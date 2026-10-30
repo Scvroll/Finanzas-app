@@ -106,6 +106,12 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.3 (vehículos y combustible)
+
+- Sube **todos** los archivos, incluidos los nuevos `js/fuel-core.js` y `js/vehiculos.js` (ya están en la lista `SHELL` de `sw.js`, con `VERSION = 'finanzas-v3.3.0'`). No cambia nada en Google Cloud: mismos permisos (`drive.appdata`; `drive.file` solo para la copia para análisis), mismo ID de cliente.
+- Los datos que ya tienes en Drive se abren tal cual: la v3.3 solo añade las colecciones `vehiculos` y `repostajes` dentro del mismo `finanzas.json`.
+- Abre la app en **cada dispositivo** con conexión para que se actualice (si no, recarga la página una vez). Mientras un dispositivo siga con una versión antigua no verá los vehículos ni los repostajes (los conservan los dispositivos con la v3.3 y los vuelven a subir al sincronizar), y si en él cambias el importe de un gasto de combustible, el repostaje no se actualiza.
+
 ## 7. Probar
 
 - **En tu ordenador**: en la carpeta de la app ejecuta `python3 -m http.server 8000` y abre <http://localhost:8000>. (Abrir `index.html` con doble clic funciona en modo local, pero Google no permite iniciar sesión desde `file://`.)

@@ -230,3 +230,29 @@ button.link:hover strong{color:var(--primary);text-decoration:underline}
 .cat-row{display:flex;gap:6px;align-items:center}
 .cat-row select{flex:1;min-width:0}
 .sugerencia{font-size:.85rem;margin-top:4px}
+/* Vehículos y combustible (v3.3) */
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+.badge.b-comb{background:color-mix(in srgb,#f59e0b 20%,transparent);color:#b45309}
+[data-theme="dark"] .badge.b-comb{color:#fbbf24}
+.chart-empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;text-align:center;padding:0 12px}
+.veh-list{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+.veh{border:1px solid var(--border);border-radius:var(--radius);padding:12px;display:flex;flex-direction:column;gap:6px}
+.veh.inactivo{opacity:.65}
+.veh-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.veh .mat{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;font-size:1.05rem;letter-spacing:.04em;border:2px solid currentColor;border-radius:6px;padding:0 6px;display:inline-block}
+.veh-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:.8rem}
+.veh-stats div{display:flex;flex-direction:column}
+.veh-stats span{color:var(--muted)}
+.veh-stats strong{font-variant-numeric:tabular-nums}
+.veh-acts{display:flex;gap:6px;flex-wrap:wrap}
+details.metodo summary{cursor:pointer}
+details.metodo ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
+.c-aviso{color:var(--warn,#b45309)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-weight:600}
+.veh.sel{outline:2px solid var(--primary)}
+.nowrap{white-space:nowrap}
+@media (max-width:640px){
+  #repBody td.actions{white-space:normal;width:1%}
+  #repBody td.actions .btn-sm{display:block;margin:2px 0 2px auto}
+  #repBody td,#vehMesesBody td,#vehAniosBody td{padding-left:4px;padding-right:4px}
+}
