@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<meta name="description" content="Control de gastos, ingresos, deudas, garantías e inversiones. Tus datos se guardan en tu propio Google Drive.">
+<title>Mis Finanzas</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Finanzas">
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+<header>
+  <div class="topbar">
+    <div class="brand">💶 Mis Finanzas</div>
+    <div class="month-nav" aria-label="Selector de mes">
+      <button class="icon-btn" id="prevMonth" title="Mes anterior" aria-label="Mes anterior">‹</button>
+      <input type="month" id="monthInput" style="width:auto" aria-label="Mes">
+      <button class="icon-btn" id="nextMonth" title="Mes siguiente" aria-label="Mes siguiente">›</button>
+    </div>
+    <button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">🌓</button>
+    <div class="account">
+      <button class="sync-chip" id="syncChip" data-auth-action="chip" data-status="local" hidden><span class="sync-dot"></span><span class="txt">Solo local</span></button>
+      <button class="gbtn" id="loginBtn" data-auth-action="login" hidden>
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        <span>Entrar con Google</span>
+      </button>
+      <div class="user-menu" id="userMenu" hidden>
+        <button class="avatar-btn" id="avatarBtn" data-auth-action="menu" aria-haspopup="true" aria-label="Cuenta">
+          <img id="avatarImg" referrerpolicy="no-referrer" alt="" hidden><span id="avatarInitial"></span>
+        </button>
+        <div class="user-pop" id="userPop" hidden>
+          <div class="user-name" id="userName"></div>
+          <div class="user-email" id="userEmail"></div>
+          <div class="muted small" id="lastSync"></div>
+          <button class="btn" data-auth-action="sync">🔄 Sincronizar ahora</button>
+          <button class="btn btn-danger" data-auth-action="logout">Cerrar sesión</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button data-view="resumen" class="active">Resumen</button>
+    <button data-view="movimientos">Movimientos</button>
+    <button data-view="deudas">Deudas</button>
+    <button data-view="inversiones">Inversiones</button>
+    <button data-view="garantias">Garantías</button>
+    <button data-view="ajustes">Ajustes</button>
+  </nav>
+</header>
+
+<main>
+  <div class="notice" id="localNotice" role="note" hidden>
+    <span>ℹ️ <strong>Modo local:</strong> los datos se guardan solo en este navegador. Para guardarlos en tu Google Drive y usarlos en varios dispositivos, configura <code>GOOGLE_CLIENT_ID</code> en <code>js/config.js</code> (ver SETUP.md).</span>
+    <button class="btn-sm" id="localNoticeClose" aria-label="Cerrar aviso">Entendido</button>
+  </div>
+  <div class="notice warn" id="garantiaBanner" role="status" hidden></div>
+  <!-- RESUMEN -->
+  <section class="view active" id="view-resumen">
+    <h2 id="resumenTitle" style="margin:4px 0 12px"></h2>
+    <div class="grid kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Ingresos</div><div class="value pos" id="kpiIngresos">0 €</div><div class="sub" id="kpiIngresosN"></div></div>
+      <div class="kpi"><div class="label">Gastos</div><div class="value neg" id="kpiGastos">0 €</div><div class="sub" id="kpiGastosN"></div></div>
+      <div class="kpi"><div class="label">Balance</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
+      <div class="kpi"><div class="label">Tasa de ahorro</div><div class="value" id="kpiAhorro">—</div><div class="sub">Balance / ingresos</div></div>
+    </div>
+    <div class="card"><h3>Desglose del mes</h3><div id="desgloseBody"></div></div>
+    <div class="grid charts">
+      <div class="card"><h3>Gastos por categoría</h3><div class="chart-box"><canvas id="chartCategorias"></canvas><div class="empty" id="chartCategoriasEmpty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center">Sin gastos este mes</div></div></div>
+      <div class="card"><h3>Evolución últimos 12 meses</h3><div class="chart-box"><canvas id="chartEvolucion"></canvas></div></div>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <h3>Top categorías de gasto</h3>
+        <div class="table-wrap"><table><thead><tr><th>Categoría</th><th class="num">Importe</th><th class="num">%</th></tr></thead><tbody id="topCatBody"></tbody></table></div>
+      </div>
+      <div class="card">
+        <h3>Últimos movimientos del mes</h3>
+        <div class="table-wrap"><table><tbody id="ultimosBody"></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MOVIMIENTOS -->
+  <section class="view" id="view-movimientos">
+    <div class="card">
+      <div class="card-head">
+        <h2 style="margin:0">Movimientos</h2>
+        <div class="row-actions">
+          <button id="exportCsvBtn" title="Exporta los movimientos que se ven con el filtro actual">⬇️ Exportar CSV</button>
+          <button class="btn-primary" id="addMovBtn">＋ Nuevo movimiento</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <div class="grow"><label for="fTexto">Buscar</label><input id="fTexto" type="search" placeholder="Descripción, categoría, cuenta…"></div>
+        <div><label for="fPeriodo">Periodo</label><select id="fPeriodo"><option value="mes">Mes seleccionado</option><option value="anio">Año seleccionado</option><option value="todo">Todo</option></select></div>
+        <div><label for="fTipo">Tipo</label><select id="fTipo"><option value="">Todos</option><option value="gasto">Gastos</option><option value="ingreso">Ingresos</option></select></div>
+        <div><label for="fCategoria">Categoría</label><select id="fCategoria"><option value="">Todas</option></select></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Categoría</th><th>Descripción</th><th class="hide-sm">Cuenta</th><th class="num">Importe</th><th></th></tr></thead>
+          <tbody id="movBody"></tbody>
+          <tfoot><tr><td colspan="5" id="movCount" class="muted"></td><td class="num" id="movTotal"></td><td></td></tr></tfoot>
+        </table>
+      </div>
+      <p class="muted small" style="margin-bottom:0">Las compras <span class="badge b-fin">Financiado</span> aparecen en gris: no suman como gasto del mes; suman sus cuotas cuando las pagas (pestaña Deudas).</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3 style="margin:0">Movimientos recurrentes</h3><button id="addRecBtn">＋ Nuevo recurrente</button></div>
+      <p class="muted small" style="margin-top:0">La app crea sola cada mes estos movimientos (al abrirla). No se duplican aunque uses varios dispositivos.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Concepto</th><th class="hide-sm">Categoría</th><th>Cuándo</th><th class="num">Importe</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="recBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- DEUDAS -->
+  <section class="view" id="view-deudas">
+    <div class="grid kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Total pendiente</div><div class="value neg" id="deuPendiente">0 €</div><div class="sub">Capital que aún debes</div></div>
+      <div class="kpi"><div class="label">Próximas cuotas</div><div class="value" id="deuCuotas">0 €</div><div class="sub">Suma de la siguiente cuota de cada deuda</div></div>
+      <div class="kpi"><div class="label">Intereses por pagar</div><div class="value" id="deuIntereses">0 €</div><div class="sub">Si pagas según el cuadro</div></div>
+      <div class="kpi"><div class="label">Deudas activas</div><div class="value" id="deuActivas">0</div><div class="sub">Préstamos y compras a plazos</div></div>
+    </div>
+    <div class="card-head" style="margin-bottom:12px"><h2 style="margin:0">Deudas y compras financiadas</h2><button class="btn-primary" id="addDeudaBtn">＋ Nueva deuda</button></div>
+    <div id="deudasList"></div>
+  </section>
+
+  <!-- INVERSIONES -->
+  <section class="view" id="view-inversiones">
+    <div class="grid kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Aportado neto</div><div class="value" id="invAportado">0 €</div><div class="sub" id="invAportadoSub"></div></div>
+      <div class="kpi"><div class="label">Valor de mercado</div><div class="value" id="invValor">0 €</div><div class="sub">Con el último precio que has anotado</div></div>
+      <div class="kpi"><div class="label">Ganancia no realizada</div><div class="value" id="invRent">0 €</div><div class="sub" id="invRentPct"></div></div>
+      <div class="kpi"><div class="label">Ganancia realizada</div><div class="value" id="invRealizada">0 €</div><div class="sub">Por ventas (método FIFO)</div></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2 style="margin:0">Cartera</h2>
+        <div class="row-actions">
+          <button id="csvBtn">⬆️ Importar CSV</button>
+          <button id="addActivoBtn">＋ Nuevo activo</button>
+          <button class="btn-primary" id="addOpBtn">＋ Compra / venta</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Activo</th><th class="num">Particip.</th><th class="num hide-sm">Coste medio</th><th class="num">Aportado neto</th><th class="num">Valor</th><th class="num">No realizada</th><th class="num hide-sm">Realizada</th><th></th></tr></thead>
+          <tbody id="invBody"></tbody>
+        </table>
+      </div>
+      <p class="muted small" style="margin-bottom:0">El valor no es en tiempo real: usa el último precio que anotes (💲) o, si no hay, el de la última operación. Aportado neto = compras (con comisiones) − ventas (netas).</p>
+    </div>
+    <div class="two-col">
+      <div class="card">
+        <h3>Ganancias realizadas por año</h3>
+        <div class="table-wrap"><table><thead><tr><th>Año</th><th class="num">Ganancia / pérdida</th></tr></thead><tbody id="realizadasBody"></tbody></table></div>
+        <p class="muted small" style="margin-bottom:0">⚖️ En España, al vender participaciones de un mismo valor, Hacienda obliga a usar <strong>FIFO</strong>: se consideran vendidas primero las que compraste antes. Así se calcula aquí. Es orientativo: no contempla traspasos entre fondos, la regla de los 2 meses ni dividendos; consulta tu borrador o a un asesor.</p>
+      </div>
+      <div class="card"><h3>Distribución por tipo (valor)</h3><div class="chart-box" style="height:260px"><canvas id="chartInversiones"></canvas></div></div>
+    </div>
+  </section>
+
+  <!-- GARANTÍAS -->
+  <section class="view" id="view-garantias">
+    <div class="card">
+      <h2 style="margin:0 0 6px">Garantías</h2>
+      <p class="muted small" id="garAvisoInfo" style="margin-top:0"></p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Producto</th><th class="hide-sm">Compra</th><th class="num hide-sm">Importe</th><th>Vence</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="garBody"></tbody></table></div>
+      <p class="muted small" style="margin-bottom:0">Consejo: adjunta el ticket o la factura a la compra (📎). Lo necesitarás para reclamar. El botón 📅 abre Google Calendar con el recordatorio ya rellenado (no necesita permisos).</p>
+    </div>
+  </section>
+
+  <!-- AJUSTES -->
+  <section class="view" id="view-ajustes">
+    <div class="two-col">
+      <div class="card">
+        <h3>Categorías de gasto</h3>
+        <ul class="cat-list" id="catGasto"></ul>
+        <div class="cat-add"><input id="newCatGasto" placeholder="Nueva categoría de gasto"><button data-addcat="gasto">Añadir</button></div>
+      </div>
+      <div class="card">
+        <h3>Categorías de ingreso</h3>
+        <ul class="cat-list" id="catIngreso"></ul>
+        <div class="cat-add"><input id="newCatIngreso" placeholder="Nueva categoría de ingreso"><button data-addcat="ingreso">Añadir</button></div>
+      </div>
+    </div>
+    <div class="card" id="accountCard"></div>
+    <div class="two-col">
+      <div class="card">
+        <h3>Avisos de garantía</h3>
+        <div class="form-grid">
+          <div><label for="ajAvisoDias">Avisar con antelación (días)</label><input id="ajAvisoDias" type="number" min="1" max="365" step="1"></div>
+          <div style="align-self:end"><label class="check"><input type="checkbox" id="ajNotif"> Notificación del navegador al abrir la app</label></div>
+        </div>
+        <p class="muted small" id="ajNotifInfo" style="margin-bottom:0"></p>
+        <p class="muted small" style="margin-bottom:0">Los avisos se muestran al abrir la app (una web no puede avisarte con la app cerrada sin un servidor). Para un aviso seguro, usa 📅 en Garantías.</p>
+      </div>
+      <div class="card" id="ocrCard">
+        <h3>Lectura de tickets y nóminas (OCR)</h3>
+        <p class="small" style="margin-top:0">Lector en uso: <strong id="ocrProveedor"></strong></p>
+        <div class="seg seg-sm" role="radiogroup" aria-label="Lector">
+          <input type="radio" name="ocrPref" id="ocrPrefTess" value="tesseract"><label for="ocrPrefTess">En el navegador (Tesseract)</label>
+          <input type="radio" name="ocrPref" id="ocrPrefGem" value="gemini"><label for="ocrPrefGem">IA de Google (Gemini)</label>
+        </div>
+        <div id="ocrTessInfo">
+          <p class="muted small">Funciona en tu navegador, gratis; las imágenes no se envían a ningún servidor. Lee fotos (no PDF) y propone importe, fecha y comercio.</p>
+          <button id="ocrPrecargar">⬇️ Descargar el lector ahora</button>
+          <p class="muted small">Descarga ahora (unos 15 MB, una sola vez) el lector para poder usarlo también sin conexión.</p>
+        </div>
+        <div id="ocrGemInfo" hidden>
+          <p class="muted small">Más preciso: lee fotos y PDF, separa IVA, conceptos y los datos de la nómina (bruto, IRPF, Seguridad Social, periodo) y puede sugerir la categoría. Necesita una <strong>clave gratuita</strong> de <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> (ver SETUP.md). Si no hay clave, no hay conexión o falla, se usa el lector del navegador.</p>
+          <div class="form-grid">
+            <div class="full"><label for="gemKey">Clave de la API de Gemini</label><input id="gemKey" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…"></div>
+            <div><label for="gemModelo">Modelo</label><select id="gemModelo"></select></div>
+            <div class="row-actions" style="align-self:end"><button id="gemGuardar" class="btn-primary">Guardar clave</button><button id="gemProbar">Probar</button><button id="gemBorrar" class="btn-danger">Quitar</button></div>
+          </div>
+          <p class="small" id="gemEstado"></p>
+          <p class="warn-box small">⚠️ La clave se guarda <strong>solo en este dispositivo</strong> (no se sincroniza ni va en las copias). Con el <strong>nivel gratuito</strong>, Google puede usar las imágenes que envíes para mejorar sus productos y personas pueden revisarlas (sus condiciones excluyen de ese uso a quienes están en el Espacio Económico Europeo, Suiza y Reino Unido). No envíes documentos que no quieras compartir con Google.</p>
+        </div>
+        <p class="muted small" id="adjInfo" style="margin-bottom:0"></p>
+      </div>
+    </div>
+    <div class="card" id="analisisCard">
+      <h3>Copia para análisis <span class="badge">opcional</span></h3>
+      <p class="small" style="margin-top:0">Si la activas, la app guarda en <strong>tu</strong> Google Drive, en una carpeta visible llamada <strong>«Finanzas App - Análisis»</strong>, una copia legible de tus datos: <code>finanzas-analisis.json</code> (movimientos, deudas con su cuadro, operaciones de inversión con los resultados FIFO y garantías) y <code>movimientos.csv</code>. Sirve para que tu asistente <strong>Grok Bot</strong> (u otra herramienta a la que tú des acceso a esa carpeta) pueda analizar tus finanzas. No incluye fotos ni PDF.</p>
+      <p class="muted small">Para ello Google te pedirá un permiso adicional, «ver, editar, crear y eliminar solo los archivos de Google Drive que uses con esta app» (<code>drive.file</code>): la app <strong>no</strong> puede ver el resto de tu Drive. Se actualiza tras sincronizar, como mucho una vez por hora, o cuando pulses «Actualizar copia ahora». Está desactivada por defecto y se configura en cada dispositivo.</p>
+      <label class="check"><input type="checkbox" id="anActivo"> Mantener una copia para análisis en mi Google Drive</label>
+      <div class="row-actions" style="margin-top:8px">
+        <button id="anAhora">🔄 Actualizar copia ahora</button>
+        <a id="anCarpeta" class="btn" target="_blank" rel="noopener" hidden>📂 Abrir la carpeta en Drive</a>
+        <button id="anBorrar" class="btn-danger" hidden>🗑️ Borrar la copia de Drive</button>
+      </div>
+      <p class="muted small" id="anEstado" style="margin-bottom:0"></p>
+    </div>
+    <div class="card">
+      <h3>Copia de seguridad</h3>
+      <p class="muted" style="margin-top:0">Además de la sincronización, puedes descargar una copia de tus datos cuando quieras. Importar una copia <strong>sustituye</strong> todos los datos (también en tus otros dispositivos si usas Google Drive). La copia JSON no incluye los archivos adjuntos (fotos y PDF), solo sus datos.</p>
+      <div class="row-actions">
+        <button id="exportJsonBtn">⬇️ Exportar copia (JSON)</button>
+        <button id="importJsonBtn">⬆️ Importar copia (JSON)</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden>
+        <button id="exportCsvAllBtn">⬇️ Exportar todos los movimientos (CSV)</button>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Datos</h3>
+      <div class="row-actions">
+        <button id="sampleBtn">🧪 Cargar datos de ejemplo</button>
+        <button id="resetBtn" class="btn-danger">🗑️ Borrar todos los datos</button>
+      </div>
+      <p class="muted" id="storageInfo" style="margin-bottom:0"></p>
+    </div>
+  </section>
+  <div class="ocr-panel card" id="ocrPanelGlobal" hidden></div>
+</main>
+
+<button class="btn-primary fab" id="fabAdd" aria-label="Nuevo movimiento">＋ Movimiento</button>
+
+<!-- Diálogo movimiento -->
+<dialog id="movDialog" class="wide">
+  <form id="movForm" method="dialog" novalidate>
+    <h3 id="movDialogTitle">Nuevo movimiento</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full dlg-top">
+        <div class="seg">
+          <input type="radio" name="tipo" id="tipoGasto" value="gasto" checked><label for="tipoGasto">Gasto</label>
+          <input type="radio" name="tipo" id="tipoIngreso" value="ingreso"><label for="tipoIngreso">Ingreso</label>
+        </div>
+        <button type="button" id="movOcrBtn" title="Haz una foto al ticket o a la nómina y la app propone los datos">📷 Leer ticket o nómina</button>
+        <input type="file" id="movOcrFile" accept="image/*,application/pdf" capture="environment" hidden>
+      </div>
+      <div class="full ocr-panel" id="ocrPanel" hidden></div>
+      <div><label for="mImporte">Importe (€)</label><input id="mImporte" name="importe" inputmode="decimal" placeholder="0,00" required autocomplete="off"></div>
+      <div><label for="mFecha">Fecha</label><input id="mFecha" name="fecha" type="date" required></div>
+      <div><label for="mCategoria">Categoría</label><div class="cat-row"><select id="mCategoria" name="categoria"></select><button type="button" class="btn-sm" id="mSugerir" title="Sugerir categoría a partir de la descripción">✨ Sugerir</button></div><div class="sugerencia muted" id="mSugerencia" hidden></div></div>
+      <div><label for="mCuenta">Cuenta (opcional)</label><input id="mCuenta" name="cuenta" list="cuentasList" placeholder="p. ej. Banco, Efectivo"><datalist id="cuentasList"></datalist></div>
+      <div class="full"><label for="mDescripcion">Descripción</label><input id="mDescripcion" name="descripcion" placeholder="p. ej. Mercadona"></div>
+      <div id="rowNaturaleza"><label>Tipo de gasto</label>
+        <div class="seg seg-sm"><input type="radio" name="naturaleza" id="natFijo" value="fijo"><label for="natFijo">Fijo</label><input type="radio" name="naturaleza" id="natVar" value="variable" checked><label for="natVar">Variable</label></div></div>
+      <div id="rowTipoIngreso"><label for="mTipoIngreso">Tipo de ingreso</label><select id="mTipoIngreso" name="tipoIngreso"><option value="nomina">Nómina</option><option value="extra">Extra</option><option value="otro">Otro</option></select></div>
+      <p class="full muted small" id="movRecNota" hidden style="margin:0">🔁 Creado por un movimiento recurrente. Cambiarlo aquí solo afecta a este mes.</p>
+    </div>
+
+    <div class="opts">
+      <div class="opt" id="optDeuda"><label class="check"><input type="checkbox" name="esPago"> 💳 Es el pago de una cuota de una deuda</label>
+        <div class="opt-body form-grid" id="optDeudaBody" hidden>
+          <div><label>Deuda</label><select name="deudaId"></select></div>
+          <div><label>Cuota</label><select name="cuotaN"></select></div>
+          <p class="full small" id="cuotaDesglose" style="margin:0"></p>
+        </div></div>
+      <div class="opt" id="optFin"><label class="check"><input type="checkbox" name="esFin"> 🏦 Compra financiada (a plazos, con tarjeta, tienda o préstamo)</label>
+        <div class="opt-body" id="optFinBody" hidden>
+          <p class="muted small" style="margin:0 0 8px">El importe de arriba es el precio de la compra. No contará como gasto del mes: contarán las cuotas cuando las pagues. Si pagaste una entrada, regístrala como otro gasto.</p>
+          <div id="movFin"></div>
+        </div></div>
+      <div class="opt" id="optGar"><label class="check"><input type="checkbox" name="esGar"> 🛡️ Tiene garantía</label>
+        <div class="opt-body form-grid" id="optGarBody" hidden>
+          <div><label>Producto</label><input name="garProducto" placeholder="p. ej. Lavadora Balay"></div>
+          <div><label>Años de garantía</label><input name="garAnios" inputmode="decimal" placeholder="3"></div>
+          <p class="full small muted" id="garVence" style="margin:0"></p>
+        </div></div>
+      <div class="opt" id="optRec"><label class="check"><input type="checkbox" name="esRec"> 🔁 Repetir cada mes</label>
+        <div class="opt-body" id="optRecBody" hidden><label class="check small"><input type="checkbox" name="recUltimo"> Siempre el último día del mes</label><p class="small muted" id="recInfo" style="margin:0"></p></div></div>
+      <div class="opt"><label>📎 Adjuntos (ticket, factura, nómina…)</label><div id="movAdj"></div></div>
+    </div>
+    <p class="neg" id="movError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="movDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button>
+      <button type="submit" class="btn-primary">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Diálogo recurrente -->
+<dialog id="recDialog">
+  <form id="recForm" method="dialog" novalidate>
+    <h3 id="recDialogTitle">Nuevo movimiento recurrente</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full"><div class="seg">
+        <input type="radio" name="tipo" id="recGasto" value="gasto" checked><label for="recGasto">Gasto</label>
+        <input type="radio" name="tipo" id="recIngreso" value="ingreso"><label for="recIngreso">Ingreso</label></div></div>
+      <div><label>Importe (€)</label><input name="importe" inputmode="decimal" placeholder="0,00"></div>
+      <div><label>Categoría</label><select name="categoria"></select></div>
+      <div id="recRowNat"><label>Tipo de gasto</label><div class="seg seg-sm"><input type="radio" name="naturaleza" id="rNatF" value="fijo" checked><label for="rNatF">Fijo</label><input type="radio" name="naturaleza" id="rNatV" value="variable"><label for="rNatV">Variable</label></div></div>
+      <div id="recRowIng"><label>Tipo de ingreso</label><select name="tipoIngreso"><option value="nomina">Nómina</option><option value="extra">Extra</option><option value="otro">Otro</option></select></div>
+      <div class="full"><label>Descripción</label><input name="descripcion" placeholder="p. ej. Alquiler piso"></div>
+      <div><label>Cuenta (opcional)</label><input name="cuenta" list="cuentasList"></div>
+      <div><label>Día del mes</label><select name="dia" id="recDiaSel"></select></div>
+      <div><label>Desde (mes)</label><input name="desde" type="month"></div>
+      <div><label>Hasta (mes, opcional)</label><input name="hasta" type="month"></div>
+      <div class="full"><label class="check"><input type="checkbox" name="activo" checked> Activo</label></div>
+    </div>
+    <p class="muted small">Elige un día fijo o «Último día del mes». Con un día fijo, si el mes tiene menos días (p. ej. día 31 en febrero), se usa el último día del mes.</p>
+    <p class="neg" id="recError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Diálogo deuda -->
+<dialog id="deudaDialog" class="wide">
+  <form id="deudaForm" method="dialog" novalidate>
+    <h3 id="deudaDialogTitle">Nueva deuda</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full"><label>Nombre</label><input name="nombre" placeholder="p. ej. Préstamo coche"></div>
+      <div><label>Categoría de las cuotas</label><select name="categoria"></select></div>
+      <div><label>Cuenta (opcional)</label><input name="cuenta" list="cuentasList"></div>
+    </div>
+    <p class="muted small" id="deudaVinculada" hidden>Vinculada a una compra financiada.</p>
+    <div id="deudaFin" style="margin-top:12px"></div>
+    <div><label>Notas</label><textarea name="notas" rows="2"></textarea></div>
+    <p class="neg" id="deudaError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Cuadro de amortización -->
+<dialog id="cuadroDialog" class="wide xl">
+  <div class="dlg-body">
+    <h3 id="cuadroTitulo">Cuadro de amortización</h3>
+    <div id="cuadroResumen"></div>
+    <div class="table-wrap" style="max-height:55vh"><table class="compact cuadro"><thead id="cuadroHead"></thead><tbody id="cuadroBody"></tbody><tfoot id="cuadroFoot"></tfoot></table></div>
+    <div class="dialog-actions"><button type="button" data-close>Cerrar</button></div>
+  </div>
+</dialog>
+
+<!-- Activo -->
+<dialog id="activoDialog">
+  <form id="activoForm" method="dialog" novalidate>
+    <h3 id="activoDialogTitle">Nuevo activo</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full"><label>Nombre</label><input name="nombre" placeholder="p. ej. Vanguard Global Stock Index"></div>
+      <div><label>Tipo</label><select name="tipo" id="aTipo"></select></div>
+      <div><label>ISIN (opcional)</label><input name="isin" placeholder="IE00B03HCZ61" autocapitalize="characters"></div>
+      <div><label>Ticker (opcional)</label><input name="ticker" placeholder="IWDA" autocapitalize="characters"></div>
+      <div class="full"><label>Notas</label><input name="notas" placeholder="p. ej. Bróker, cuenta…"></div>
+    </div>
+    <p class="neg" id="activoError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="activoDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Operación -->
+<dialog id="opDialog">
+  <form id="opForm" method="dialog" novalidate>
+    <h3 id="opDialogTitle">Nueva operación</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full"><label>Activo</label><select name="activoId"></select></div>
+      <div class="full"><div class="seg">
+        <input type="radio" name="tipo" id="opCompra" value="compra" checked><label for="opCompra">Compra</label>
+        <input type="radio" name="tipo" id="opVenta" value="venta"><label for="opVenta">Venta</label></div></div>
+      <div><label>Fecha</label><input name="fecha" type="date"></div>
+      <div><label>Participaciones</label><input name="participaciones" inputmode="decimal" placeholder="p. ej. 12,3456"></div>
+      <div><label>Precio por participación (€)</label><input name="precio" inputmode="decimal" placeholder="p. ej. 45,67"></div>
+      <div><label>Comisiones (€)</label><input name="comisiones" inputmode="decimal" placeholder="0,00"></div>
+      <div class="full"><label>Notas</label><input name="notas"></div>
+      <p class="full small" id="opPreview" style="margin:0"></p>
+    </div>
+    <p class="neg" id="opError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Precio -->
+<dialog id="precioDialog">
+  <form id="precioForm" method="dialog" novalidate>
+    <h3 id="precioTitulo">Actualizar precio</h3>
+    <input type="hidden" name="activoId">
+    <div class="form-grid">
+      <div><label>Fecha</label><input name="fecha" type="date"></div>
+      <div><label>Precio por participación (€)</label><input name="precio" inputmode="decimal"></div>
+    </div>
+    <p class="muted small" id="precioInfo"></p>
+    <p class="neg" id="precioError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Detalle de activo -->
+<dialog id="detDialog" class="wide xl">
+  <div class="dlg-body">
+    <div class="card-head"><div><h3 id="detTitulo" style="margin:0"></h3><div class="muted small" id="detSub"></div></div>
+      <div class="row-actions"><button class="btn-sm" id="detOp">＋ Compra</button><button class="btn-sm" id="detVenta">− Venta</button><button class="btn-sm" id="detPrecio">💲 Precio</button><button class="btn-sm" id="detEditar">✏️ Editar</button></div></div>
+    <div id="detKpis"></div>
+    <h4>Lotes vivos (FIFO)</h4>
+    <div class="table-wrap"><table class="compact"><thead><tr><th>Compra</th><th class="num">Participaciones</th><th class="num">Precio</th><th class="num">Coste unitario*</th><th class="num">Coste</th><th class="num">No realizada</th></tr></thead><tbody id="detLotes"></tbody></table></div>
+    <p class="muted small">* Coste unitario incluye la parte proporcional de las comisiones de compra.</p>
+    <h4>Ventas y lotes consumidos</h4>
+    <div id="detVentas"></div>
+    <div class="two-col">
+      <div><h4>Operaciones</h4><div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Part.</th><th class="num">Precio</th><th class="num hide-sm">Comis.</th><th class="num">Importe</th><th></th></tr></thead><tbody id="detOps"></tbody></table></div></div>
+      <div><h4>Historial de precios</h4><div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th class="num">Precio</th><th></th></tr></thead><tbody id="detPrecios"></tbody></table></div>
+        <h4>📎 Documentos</h4><div id="detAdj"></div></div>
+    </div>
+    <div class="dialog-actions"><button type="button" data-close>Cerrar</button></div>
+  </div>
+</dialog>
+
+<!-- Importar CSV -->
+<dialog id="csvDialog" class="wide">
+  <div class="dlg-body">
+    <h3>Importar operaciones desde CSV</h3>
+    <p class="small" style="margin-top:0">Columnas (separadas por <code>;</code> o <code>,</code>): <code>fecha;activo;tipo_activo;isin_ticker;operacion;participaciones;precio;comisiones;notas</code>. Fechas <code>2025-03-15</code> o <code>15/03/2025</code>; decimales con coma o punto. <button type="button" class="btn-sm" data-plantilla-csv>⬇️ Descargar plantilla</button></p>
+    <input type="file" id="csvFile" accept=".csv,text/csv,text/plain">
+    <div id="csvPreview" style="margin-top:12px"></div>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="button" class="btn-primary" id="csvImportar" disabled>Importar</button></div>
+  </div>
+</dialog>
+
+<!-- Visor de adjuntos -->
+<dialog id="visorDialog" class="wide xl">
+  <div class="dlg-body">
+    <h3 id="visorTitulo" style="margin-bottom:2px"></h3>
+    <div class="muted small" id="visorMeta"></div>
+    <div class="visor" id="visorCuerpo"></div>
+    <div id="visorOcr"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="visorBorrar" style="margin-right:auto">Eliminar</button>
+      <button type="button" id="visorLeer">🔍 Leer texto (OCR)</button>
+      <a class="btn" id="visorDescargar">⬇️ Descargar</a>
+      <button type="button" data-close>Cerrar</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<!-- Configuración (pon aquí tu GOOGLE_CLIENT_ID) -->
+<script src="js/config.js"></script>
+<script src="js/sync-core.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/finance-core.js"></script>
+<script src="js/attachments.js"></script>
+<script src="js/ocr.js"></script>
+<script src="js/ocr-gemini.js"></script>
+<script src="js/app.js"></script>
+<script src="js/app-extra.js"></script>
+<script src="js/analysis-export.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
