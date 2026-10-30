@@ -7,7 +7,7 @@
    Si lo dejas vacío (''), la app funciona en MODO LOCAL: los datos se
    guardan solo en este navegador y no se sincronizan.
    ===================================================================== */
-const GOOGLE_CLIENT_ID = '';
+const GOOGLE_CLIENT_ID = '445082201716-lps52a8d44fov4mrq7k4hequ7b64ichc.apps.googleusercontent.com';
 
 /* --- No hace falta tocar nada debajo de esta línea --- */
 window.FINANZAS_CONFIG = {
@@ -16,7 +16,7 @@ window.FINANZAS_CONFIG = {
   DRIVE_SCOPE: 'https://www.googleapis.com/auth/drive.appdata',
   // Permiso OPCIONAL, solo si activas «Copia para análisis» en Ajustes: acceso únicamente
   // a los archivos que crea la propia app (carpeta visible «Finanzas App - Análisis»)
-  APP_VERSION: '3.2.0',
+  APP_VERSION: '3.2.1',
   ANALISIS_SCOPE: 'https://www.googleapis.com/auth/drive.file',
   ANALISIS_CARPETA: 'Finanzas App - Análisis',
   ANALISIS_INTERVALO_MS: 60 * 60 * 1000,   // como mucho una actualización automática por hora
