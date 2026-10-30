@@ -3,7 +3,7 @@
    Se usa en el navegador y en los tests de Node.
    Modelo:
    - Cada registro de cada colección (movimientos, recurrentes, deudas,
-     adjuntos, activos, operaciones, precios…) tiene id y updatedAt (ms).
+     adjuntos, activos, operaciones, precios, vehiculos, repostajes…) tiene id y updatedAt (ms).
    - Borrar = "lápida" (tombstone): {id, deleted:true, updatedAt}.
      Así otro dispositivo no "resucita" lo borrado.
    - Fusión por id: gana la versión con updatedAt más reciente
@@ -16,7 +16,7 @@
   const DOC_VERSION = 3;
   // Colecciones sincronizadas registro a registro. «inversiones» es la de la v2: se conserva
   // solo para que sus lápidas (tras migrar a activos/operaciones) lleguen a todos los dispositivos.
-  const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios'];
+  const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios', 'vehiculos', 'repostajes'];
   // Lápidas que no se purgan nunca: los movimientos generados por plantillas recurrentes tienen id
   // determinista y se volverían a generar si su lápida desapareciera.
   const NO_PURGAR = /^rec_/;

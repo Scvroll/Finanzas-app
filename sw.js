@@ -5,13 +5,13 @@
      y el lector de texto Tesseract.js (se descarga solo cuando se usa por primera vez).
    - Nunca guarda nada de Google (inicio de sesión ni datos de Drive).
    Al cambiar archivos de la app, sube VERSION para forzar la actualización. */
-const VERSION = 'finanzas-v3.2.1';
+const VERSION = 'finanzas-v3.3.0';
 const CDN_CACHE = 'finanzas-cdn-v1'; // aparte: no se vacía al actualizar la app (las URL llevan versión)
 const CHART_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
 const SHELL = [
   './', './index.html', './manifest.json', './css/styles.css',
   './js/config.js', './js/sync-core.js', './js/storage.js', './js/auth.js',
-  './js/finance-core.js', './js/attachments.js', './js/ocr.js', './js/ocr-gemini.js', './js/app.js', './js/app-extra.js', './js/analysis-export.js', './js/main.js',
+  './js/finance-core.js', './js/fuel-core.js', './js/attachments.js', './js/ocr.js', './js/ocr-gemini.js', './js/app.js', './js/app-extra.js', './js/vehiculos.js', './js/analysis-export.js', './js/main.js',
   './plantillas/inversiones-plantilla.csv',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png'
 ];

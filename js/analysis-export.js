@@ -3,7 +3,8 @@
    Escribe en una carpeta VISIBLE del Google Drive del usuario
    («Finanzas App - Análisis») una copia legible de sus datos:
      - finanzas-analisis.json  (movimientos, deudas con cuadro, inversiones
-                                con resultados FIFO, garantías, resúmenes)
+                                con resultados FIFO, garantías, vehículos y
+                                repostajes con consumos, resúmenes)
      - movimientos.csv         (coma, punto decimal, fechas ISO)
    Permiso: drive.file (solo archivos creados por la app), pedido de forma
    incremental únicamente cuando el usuario activa la opción.
@@ -13,6 +14,7 @@
 (function (root) {
   'use strict';
   const FC = root.FinanceCore || (typeof require === 'function' ? require('./finance-core.js') : null);
+  const Fuel = root.FuelCore || (typeof require === 'function' ? require('./fuel-core.js') : null);
   const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
   const vivos = l => (l || []).filter(x => x && !x.deleted);
   const ym = f => String(f || '').slice(0, 7);
@@ -24,6 +26,9 @@
     const adj = vivos(estado.adjuntos);
     const nAdj = id => adj.filter(a => a.ownerId === id).length;
 
+    const repDeMovPre = {}, vehPre = {};
+    for (const r of vivos(estado.repostajes)) if (r.movimientoId) repDeMovPre[r.movimientoId] = r;
+    for (const v of vivos(estado.vehiculos)) vehPre[v.id] = v;
     const movimientos = movs.map(m => {
       const o = { id: m.id, fecha: m.fecha, tipo: m.tipo, importe: r2(m.importe), categoria: m.categoria, descripcion: m.descripcion || '', cuenta: m.cuenta || '' };
       if (m.tipo === 'gasto') o.naturaleza = m.naturaleza || 'variable'; else o.tipoIngreso = m.tipoIngreso || 'otro';
@@ -31,6 +36,8 @@
       if (m.deudaId) { o.deudaId = m.deudaId; o.cuotaN = m.cuotaN; if (m.desglose) o.desgloseCuota = m.desglose; }
       if (m.financiadoPor) o.financiadoPor = m.financiadoPor;
       if (m.garantia) o.garantia = { producto: m.garantia.producto || '', anios: m.garantia.anios };
+      const rp = repDeMovPre[m.id];
+      if (rp) { const v = vehPre[rp.vehiculoId]; o.repostaje = { id: rp.id, vehiculoId: rp.vehiculoId, matricula: v ? v.matricula : '', litros: rp.litros, precioLitro: rp.precioLitro, kmTanqueAnterior: rp.kmTanqueAnterior ?? null, odometro: rp.odometro ?? null, lleno: rp.lleno !== false }; }
       const n = nAdj(m.id); if (n) o.adjuntos = n;
       return o;
     });
@@ -88,21 +95,42 @@
       return { movimientoId: m.id, producto: m.garantia.producto || m.descripcion, fechaCompra: m.fecha, importe: r2(m.importe), anios: m.garantia.anios, vence, diasRestantes: e.dias, estado: e.estado };
     }).sort((a, b) => a.vence.localeCompare(b.vence));
 
+    // Vehículos y combustible (v3.3)
+    const vehs = vivos(estado.vehiculos), reps = vivos(estado.repostajes), movIds = new Set(movs.map(m => m.id));
+        const metr = m => ({ repostajes: m.repostajes, gasto: m.gasto, litros: m.litros, precioMedioLitro: m.precioMedio, km: m.km, kmConConsumo: m.kmConsumo,
+      litrosPor100km: m.l100, kmPorLitro: m.kmL, eurosPorKm: m.eurKm, consumoAproximado: m.aproximado });
+    const res = Fuel.resumen(vehs, reps, {});
+    const vehiculos = res.vehiculos.map(({ vehiculo: v, m }) => ({
+      id: v.id, matricula: v.matricula, nombre: v.nombre || '', combustible: v.combustible, capacidadLitros: v.capacidad, kmIniciales: v.kmIniciales, activo: v.activo !== false,
+      metricas: { ...metr(m), autonomiaKm: m.autonomia, costeLlenado: m.costeLleno, cuentakmEstimado: m.odometroEstimado, ultimoRepostaje: m.ultimo ? m.ultimo.fecha : null },
+      porMes: Fuel.porMes([v], reps, {}), porAnio: Fuel.porAnio([v], reps),
+      repostajes: m.filas.map(r => {
+        const t = m.tramosLista.find(x => x.hastaId === r.id);
+        return { id: r.id, fecha: r.fecha, movimientoId: movIds.has(r.movimientoId) ? r.movimientoId : null, litros: r.litros, precioLitro: r.precioLitro, importe: r.importe, lleno: r.lleno,
+          kmTanqueAnterior: r.kmTanqueAnterior, km: r.km, odometro: r.odometro, gasolinera: r.gasolinera || '',
+          tramo: t ? { desde: t.desde, litros: t.litros, km: t.km, litrosPor100km: t.l100, eurosPorKm: t.eurKm, metodo: t.metodo } : null };
+      })
+    }));
+    const combustible = { metodo: 'Consumo «lleno a lleno»: litros y euros repostados desde el último depósito lleno hasta el siguiente (incluidos los parciales) ÷ km recorridos en ese tramo. Si no hay dos llenos seguidos: aproximado con litros del repostaje anterior ÷ km. €/L medio ponderado por litros. €/km solo incluye combustible.',
+      totales: metr(res.total), porMes: Fuel.porMes(vehs, reps, {}), porAnio: Fuel.porAnio(vehs, reps) };
+
     const recurrentes = vivos(estado.recurrentes).map(r => ({ id: r.id, tipo: r.tipo, descripcion: r.descripcion, categoria: r.categoria, importe: r2(r.importe), dia: r.dia, desde: r.desde, hasta: r.hasta || '', activo: r.activo !== false, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso }));
 
     const json = {
       app: 'Finanzas App', formato: 'finanzas-analisis', version: 1, appVersion: version, generadoEn: ahora, fechaReferencia: hoy, moneda: 'EUR',
       leeme: 'Copia de solo lectura generada por la app para que el usuario o su asistente puedan analizar sus finanzas. Se sobrescribe en cada actualización: los cambios hechos aquí se pierden. Importes en euros (punto decimal). Gastos en positivo. Las compras financiadas (financiadoPor) no cuentan como gasto del mes: cuentan sus cuotas (movimientos con deudaId). Ganancias de inversiones calculadas por FIFO (método obligatorio en España para valores homogéneos); precios introducidos a mano por el usuario.',
       categorias: estado.categorias ? { gasto: estado.categorias.gasto || [], ingreso: estado.categorias.ingreso || [] } : null,
-      totales: { movimientos: movimientos.length, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: r2(deudas.reduce((s, d) => s + d.capitalPendiente, 0)), cartera: tot, garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },
+      totales: { movimientos: movimientos.length, vehiculos: vehiculos.length, gastoCombustible: combustible.totales.gasto, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: r2(deudas.reduce((s, d) => s + d.capitalPendiente, 0)), cartera: tot, garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },
       resumenMensual, gastosPorCategoria, movimientos, recurrentes, deudas,
       inversiones: { metodo: 'FIFO', activos: activosOut, totales: tot },
-      garantias
+      garantias,
+      vehiculos, combustible
     };
 
     const q = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios'];
-    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : ''].map(q).join(','));
+    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
+    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
+      m.repostaje ? m.repostaje.matricula : '', m.repostaje ? m.repostaje.litros : '', m.repostaje ? m.repostaje.precioLitro : '', m.repostaje ? m.repostaje.kmTanqueAnterior ?? '' : '', m.repostaje ? m.repostaje.odometro ?? '' : '', m.repostaje ? (m.repostaje.lleno ? 'si' : 'no') : ''].map(q).join(','));
     const csv = '\ufeff' + [cols.join(','), ...filas].join('\r\n') + '\r\n';
     return { json, csv };
   }

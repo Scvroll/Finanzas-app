@@ -1,6 +1,6 @@
 # 💶 Mis Finanzas (v3)
 
-App web personal para controlar **gastos, ingresos, deudas, garantías e inversiones** en euros. Es una web **estática** (HTML + CSS + JavaScript, sin compilación ni servidor propio), gratuita y en español.
+App web personal para controlar **gastos, ingresos, deudas, garantías, inversiones y combustible de tus vehículos** en euros. Es una web **estática** (HTML + CSS + JavaScript, sin compilación ni servidor propio), gratuita y en español.
 
 - **Entrar con Google** y guardar los datos en **tu propio Google Drive** (carpeta privada de la app, permiso `drive.appdata`), para usarlos en varios dispositivos.
 - **Funciona sin conexión** y se puede **instalar como app** (PWA) en el móvil o el ordenador.
@@ -10,7 +10,7 @@ App web personal para controlar **gastos, ingresos, deudas, garantías e inversi
 
 ![Resumen con datos de ejemplo](screenshots/ejemplo-resumen.png)
 
-Más capturas en [`screenshots/`](screenshots/) (movimientos, deudas, inversiones, garantías, ajustes, lectura de tickets, móvil).
+Más capturas en [`screenshots/`](screenshots/) (movimientos, deudas, inversiones, garantías, vehículos, ajustes, lectura de tickets, móvil).
 
 ## Cómo abrirla en tu ordenador
 
@@ -52,6 +52,14 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 - Pestaña **Garantías**: vigentes, a punto de caducar y caducadas, con el ticket adjunto a mano.
 - **Aviso** en la parte de arriba cuando una garantía caduca en los próximos N días (configurable), enlace **«Añadir a Google Calendar»** para crear un recordatorio, y **notificación del navegador** opcional (solo cuando abres la app).
 
+### Vehículos y combustible (v3.3)
+- Pestaña **Vehículos**: alta de cada coche o moto con **matrícula** (única), nombre, combustible (gasóleo/gasolina/otro), **litros que caben en el depósito** (se piden al crearlo) y cuentakilómetros actual (opcional). Se puede marcar como *no en uso* para conservar sus estadísticas.
+- **Repostaje** desde *＋ Movimiento* (al elegir la categoría **Combustible** o marcar **⛽ Repostaje**) o con el botón **⛽ Repostaje** de la pestaña: vehículo, **precio del litro**, **litros**, **km hechos con el depósito anterior**, cuentakilómetros (opcional), si has llenado el depósito y gasolinera. Con dos de los tres datos *importe / precio por litro / litros* calcula el tercero (y avisa si no cuadran o si son más litros de los que caben).
+- Cada repostaje **es un gasto normal** (categoría «Combustible», etiqueta ⛽ con la matrícula en Movimientos): cuenta en los totales del mes. Editarlo o borrarlo en un sitio lo cambia en el otro.
+- **Métricas** por vehículo y en total, por periodo (últimos 12 meses, cada año o todo): gasto, **€/km**, **L/100 km**, **km/L**, **€/L medio** (ponderado por litros, con mínimo y máximo), litros, km, **autonomía** con el depósito lleno, coste de llenarlo, cuentakilómetros estimado y último repostaje; tablas **por mes** y **por año**, y gráficos del **precio del litro** y del **consumo**.
+- **Cómo se calcula** (también explicado en la app): método *lleno a lleno*. Entre dos repostajes con el depósito lleno, el consumo son los litros que repones en el segundo (más los de los parciales intermedios) ÷ los km de ese tramo. Los km son los que anotas («km con el depósito anterior»); si no los anotas, la diferencia del cuentakilómetros. Si un vehículo aún no tiene dos llenos seguidos, se usa una **aproximación** (litros del repostaje anterior ÷ km) marcada con *. El €/km solo incluye combustible.
+- Borrar un vehículo borra sus repostajes (litros, km), pero **sus gastos se quedan** en Movimientos como gastos normales.
+
 ### Inversiones
 - **Activos** (fondo, ETF, acción, cripto, depósito…) con ISIN/ticker, y **operaciones** de compra y venta (participaciones, precio, comisión).
 - **Método FIFO** (el que usa Hacienda en España): coste medio, aportado neto, ganancia **realizada** por venta y por año, y **no realizada**.
@@ -60,7 +68,7 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 - Las inversiones de la v2 (aportado y valor actual) se migran solas a un activo con una compra y un precio.
 
 ### Copia para análisis (opcional, desactivada por defecto)
-- En **Ajustes → Copia para análisis** puedes pedir que la app guarde en tu Drive, en una carpeta **visible** llamada **«Finanzas App - Análisis»**, una copia legible: `finanzas-analisis.json` (movimientos, deudas con cuadro, inversiones con resultados FIFO, garantías) y `movimientos.csv`. Sirve para que tu asistente (u otra herramienta a la que des acceso a esa carpeta) pueda analizar tus finanzas.
+- En **Ajustes → Copia para análisis** puedes pedir que la app guarde en tu Drive, en una carpeta **visible** llamada **«Finanzas App - Análisis»**, una copia legible: `finanzas-analisis.json` (movimientos, deudas con cuadro, inversiones con resultados FIFO, garantías, vehículos con repostajes y consumos) y `movimientos.csv`. Sirve para que tu asistente (u otra herramienta a la que des acceso a esa carpeta) pueda analizar tus finanzas.
 - Al activarla, Google pide un permiso adicional, `drive.file` (*«ver, editar, crear y eliminar solo los archivos de Google Drive que uses con esta app»*): la app **no** puede ver el resto de tu Drive.
 - Se actualiza tras sincronizar, **como mucho una vez por hora**, o al pulsar **«Actualizar copia ahora»**. Se activa **en cada dispositivo** por separado. No incluye las fotos ni los PDF adjuntos.
 - **«Borrar la copia de Drive»** elimina la carpeta y desactiva la copia (para que no se vuelva a crear sola). Tus datos de la app no se tocan.
@@ -76,9 +84,10 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 - Siempre hay una **copia local** en el navegador. Todo cambio se guarda primero ahí y, unos 2 segundos después, se sube a Drive.
 - **Sin conexión** puedes seguir usando la app: los cambios quedan pendientes y se suben solos cuando vuelve la conexión.
 - La app comprueba Drive al abrirla, al volver a la pestaña y cada 5 minutos.
-- **Conflictos:** cada elemento (movimiento, recurrente, deuda, adjunto, activo, operación, precio y la lista de categorías) lleva la hora de su último cambio; si se cambió en dos dispositivos, gana el más reciente. Lo borrado se recuerda como «borrado» 180 días para que no reaparezca (los movimientos generados por recurrentes, siempre, para que no se vuelvan a crear).
+- **Conflictos:** cada elemento (movimiento, recurrente, deuda, adjunto, activo, operación, precio, vehículo, repostaje y la lista de categorías) lleva la hora de su último cambio; si se cambió en dos dispositivos, gana el más reciente. Lo borrado se recuerda como «borrado» 180 días para que no reaparezca (los movimientos generados por recurrentes, siempre, para que no se vuelvan a crear).
 - **Estado** (arriba a la derecha): *Solo local*, *Sincronizado*, *Sincronizando…*, *Sin conexión*, *Error* o *Reconectar*. Al pulsarlo se sincroniza.
 - El permiso de Google dura 1 hora; la app lo renueva sola (puede verse un parpadeo de una ventana de Google). Si no puede, aparece *Reconectar*.
+- **Actualiza todos tus dispositivos a la v3.3** (basta con abrir la app con conexión). Una versión anterior abre bien los datos nuevos, pero no muestra los vehículos ni los conserva al subir sus cambios (los vuelve a añadir el siguiente dispositivo con la v3.3 que sincronice), y si en ella cambias el importe de un gasto de combustible, el repostaje no se entera (revísalo luego en la v3.3). Si en una versión anterior **borras** un gasto de combustible, su repostaje queda marcado «Sin gasto» en la pestaña Vehículos.
 - El tema, los avisos de garantía, la clave de Gemini y la copia para análisis son ajustes **de cada dispositivo** y no se sincronizan.
 
 ## Archivos
@@ -89,6 +98,7 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 | `css/styles.css` | Estilos |
 | `js/config.js` | **Configuración: aquí va tu `GOOGLE_CLIENT_ID`**; versión y nombre de la carpeta de análisis |
 | `js/finance-core.js` | Cálculos sin dependencias: cuota francesa, TAE, FIFO, recurrentes, garantías, CSV (probado con tests) |
+| `js/fuel-core.js` | Cálculos de combustible sin dependencias: importe/precio/litros, consumo lleno a lleno, €/km, resúmenes por mes y año (probado con tests) |
 | `js/sync-core.js` | Lógica de fusión (sin dependencias, probada con tests) |
 | `js/storage.js` | Caché local, cliente de la API de Drive y adaptadores `LocalStorageAdapter` / `DriveAdapter` |
 | `js/auth.js` | Inicio de sesión con Google Identity Services (y permiso adicional `drive.file`) |
@@ -97,6 +107,7 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 | `js/ocr-gemini.js` | Proveedor opcional Gemini (respuesta JSON estructurada) y sugerencia de categoría |
 | `js/analysis-export.js` | Copia para análisis en una carpeta visible de Drive |
 | `js/app.js`, `js/app-extra.js`, `js/main.js` | Interfaz, `Store` y pantallas |
+| `js/vehiculos.js` | Pestaña Vehículos, diálogo de vehículo y opción ⛽ del diálogo de movimiento |
 | `manifest.json`, `sw.js`, `icons/` | App instalable y funcionamiento sin conexión |
 | `plantillas/inversiones-plantilla.csv` | Plantilla para importar operaciones |
 | `tests/` | Tests (ver abajo) |
@@ -119,18 +130,23 @@ Esquema (versión 3, resumido):
   version: 3,
   movimientos: [{ id, tipo: 'gasto'|'ingreso', fecha, importe, categoria, descripcion, cuenta,
                   naturaleza: 'fijo'|'variable', tipoIngreso, recurrenteId, deudaId, financiadoPor,
-                  cuotaN, desglose: { interes, amortizacion, comision }, garantia: { producto, anios }, updatedAt }],
+                  cuotaN, desglose: { interes, amortizacion, comision }, garantia: { producto, anios },
+                  repostajeId, updatedAt }],         // repostajeId: solo en gastos de combustible (v3.3)
   recurrentes: [{ id, tipo, importe, categoria, dia: 1..31|'ultimo', desde: 'AAAA-MM', hasta, activo, ... }],
   deudas:      [{ id, nombre, categoria, fechaPrimeraCuota, diaCobro: 1..31|'ultimo', ... }],   // + importe financiado, TIN, plazo, comisión
   adjuntos:    [{ id, nombre, driveId, ocr, ... }],   // metadatos; el archivo va aparte (IndexedDB / Drive)
   activos:     [{ id, nombre, tipo, isin, ticker, ... }],
   operaciones: [...],                     // compras y ventas de cada activo
   precios:     [...],                     // historial de precios apuntados a mano
+  vehiculos:   [{ id, matricula, nombre, combustible: 'gasoil'|'gasolina'|'otro', capacidad, kmIniciales, activo, notas, creado }],   // v3.3
+  repostajes:  [{ id, vehiculoId, movimientoId, fecha, litros, precioLitro, importe, kmTanqueAnterior, odometro, lleno, gasolinera, creado }],   // v3.3
   inversiones: [],                        // v2: solo quedan borrados tras la migración
   categorias:  { gasto: [...], ingreso: [...], updatedAt },
   ajustes:     { tema, avisoGarantiaDias, notificaciones }   // solo local
 }
 // Cada elemento borrado queda como { id, deleted: true, updatedAt }.
+// v3.3 añade dos colecciones (vehiculos, repostajes) sin cambiar nada de lo anterior: los datos antiguos se abren tal cual.
+// El enlace gasto ↔ repostaje es repostajes[].movimientoId (movimientos[].repostajeId es solo un atajo).
 ```
 
 ## Copias de seguridad
@@ -146,6 +162,7 @@ Menú de tu foto → **Cerrar sesión**. La app pregunta si quieres borrar tambi
 - La lectura de tickets **no es perfecta** (sobre todo Tesseract con fotos torcidas, arrugadas o con poca luz): revisa siempre la propuesta. Tesseract no lee PDF (Gemini sí).
 - La TAE se calcula con la TIR mensual de los pagos (incluida la comisión de apertura); puede diferir unas décimas de la que dé el banco (seguros, otras comisiones, redondeos).
 - Inversiones: no contempla traspasos entre fondos, dividendos, splits ni la regla de los 2 meses; es orientativo para la declaración. Los precios se apuntan a mano.
+- Combustible: el consumo es exacto solo entre dos depósitos **llenos**; con repostajes parciales y sin km anotados, es una aproximación. El €/km no incluye seguro, mantenimiento ni peajes.
 - Las notificaciones de garantía solo salen cuando la app está abierta (no hay servidor que las envíe).
 - La copia para análisis se actualiza como mucho una vez por hora y solo desde los dispositivos donde está activada; si el permiso de Google ha caducado, espera a que vuelvas a entrar o pulses *Actualizar copia ahora*.
 
@@ -159,7 +176,7 @@ Menú de tu foto → **Cerrar sesión**. La app pregunta si quieres borrar tambi
 ### Tests
 
 ```bash
-node tests/finance.test.js          # cálculos: cuota, TAE, FIFO, recurrentes, garantías, CSV, migración
+node tests/finance.test.js          # cálculos: cuota, TAE, FIFO, recurrentes, garantías, combustible, CSV, migración
 node tests/sync.test.js             # sincronización con Drive simulado (dos dispositivos, sin conexión)
 
 # Tests de navegador (necesitan Google Chrome y playwright-core: npm i playwright-core)

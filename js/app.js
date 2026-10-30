@@ -57,7 +57,7 @@ const MEDIOS_FIN = { tarjeta: 'Tarjeta de crédito', tienda: 'Financiación de t
 const TIPOS_INGRESO = { nomina: 'Nómina', extra: 'Extra', otro: 'Otro' };
 const CATS_FIJAS = ['Vivienda', 'Suministros', 'Telefonía e internet', 'Seguros', 'Suscripciones'];
 const DEFAULT_CATEGORIAS = {
-  gasto: ['Vivienda', 'Supermercado', 'Restaurantes', 'Transporte', 'Suministros', 'Telefonía e internet', 'Salud', 'Ocio', 'Ropa', 'Electrónica', 'Hogar', 'Educación', 'Suscripciones', 'Viajes', 'Seguros', 'Impuestos', 'Regalos', 'Mascotas', 'Deudas', 'Otros'],
+  gasto: ['Vivienda', 'Supermercado', 'Restaurantes', 'Transporte', 'Combustible', 'Suministros', 'Telefonía e internet', 'Salud', 'Ocio', 'Ropa', 'Electrónica', 'Hogar', 'Educación', 'Suscripciones', 'Viajes', 'Seguros', 'Impuestos', 'Regalos', 'Mascotas', 'Deudas', 'Otros'],
   ingreso: ['Nómina', 'Freelance', 'Intereses', 'Dividendos', 'Alquiler', 'Reembolsos', 'Regalos', 'Otros']
 };
 const AJUSTES_DEFECTO = { tema: 'auto', avisoGarantiaDias: 30, notificaciones: false };
@@ -94,6 +94,7 @@ const NORMALIZAR = {
       mov.tipoIngreso = TIPOS_INGRESO[m.tipoIngreso] ? m.tipoIngreso : tipoIngresoPorDefecto(mov.categoria);
     }
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
+    if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
     return mov;
   },
   inversiones(i) { return i.nombre ? { ...i } : null; }, // v2: se migra justo después
@@ -131,6 +132,28 @@ const NORMALIZAR = {
   precios(p) {
     if (!p.activoId || !FC.isISO(p.fecha) || !(num(p.precio) >= 0)) return null;
     return { id: p.id || uid(), activoId: p.activoId, fecha: p.fecha, precio: num(p.precio) };
+  },
+  // v3.3: vehículos y repostajes (combustible)
+  vehiculos(v) {
+    const matricula = FuelCore.normalizarMatricula(v.matricula);
+    if (!matricula) return null;
+    const kmI = v.kmIniciales === null || v.kmIniciales === undefined || v.kmIniciales === '' ? null : num(v.kmIniciales, -1);
+    return { id: v.id || uid(), matricula, nombre: txt(v.nombre), combustible: FuelCore.COMBUSTIBLES[v.combustible] ? v.combustible : 'gasoil',
+      capacidad: num(v.capacidad) > 0 ? round2(num(v.capacidad)) : null, kmIniciales: kmI !== null && kmI >= 0 ? Math.round(kmI) : null,
+      activo: v.activo !== false, notas: txt(v.notas), creado: num(v.creado) };
+  },
+  repostajes(r) {
+    if (!r.vehiculoId || !FC.isISO(r.fecha) || !(num(r.litros) > 0)) return null;
+    const litros = Math.round(num(r.litros) * 100) / 100;
+    let precioLitro = num(r.precioLitro), importe = num(r.importe);
+    if (!(importe > 0) && precioLitro > 0) importe = precioLitro * litros;
+    if (!(precioLitro > 0) && importe > 0) precioLitro = importe / litros;
+    if (!(importe > 0)) return null;
+    const opt = (x, f) => num(x) > 0 ? f(num(x)) : null;
+    return { id: r.id || uid(), vehiculoId: String(r.vehiculoId), movimientoId: r.movimientoId ? String(r.movimientoId) : null, fecha: r.fecha,
+      litros, precioLitro: Math.round(precioLitro * 1000) / 1000, importe: round2(importe),
+      kmTanqueAnterior: opt(r.kmTanqueAnterior, n => Math.round(n * 10) / 10), odometro: opt(r.odometro, Math.round),
+      lleno: r.lleno !== false, gasolinera: txt(r.gasolinera), creado: num(r.creado) };
   }
 };
 
@@ -215,6 +238,10 @@ const Store = {
     const old = this.state[col][i];
     this.state[col][i] = tombstone(id, t, old.driveId ? { driveId: old.driveId } : {});
     if (col === 'movimientos' || col === 'activos') this.state.adjuntos.filter(a => !a.deleted && a.ownerId === id).forEach(a => this._del('adjuntos', a.id, t));
+    // Borrar el gasto de un repostaje borra su repostaje. Borrar un vehículo borra sus repostajes,
+    // pero NO sus gastos (siguen contando en los totales del mes).
+    if (col === 'movimientos') this.state.repostajes.filter(r => !r.deleted && r.movimientoId === id).forEach(r => this._del('repostajes', r.id, t));
+    if (col === 'vehiculos') this.state.repostajes.filter(r => !r.deleted && r.vehiculoId === id).forEach(r => this._del('repostajes', r.id, t));
   },
   /** Aplica varios cambios en una sola escritura: [{col, rec}] o [{col, del: id}] */
   async apply(cambios) {
@@ -509,6 +536,8 @@ function badges(m) {
   if (m.financiadoPor) out.push('<span class="badge b-fin" title="Compra a plazos: cuentan las cuotas, no este importe">Financiado</span>');
   if (m.garantia) out.push('<span class="badge b-gar" title="Tiene garantía">🛡️</span>');
   if (m.recurrenteId) out.push('<span class="badge b-rec" title="Generado por un movimiento recurrente">🔁</span>');
+  const rp = typeof repostajeDeMov === 'function' ? repostajeDeMov(m) : null;
+  if (rp) { const v = Store.get('vehiculos', rp.vehiculoId); out.push(`<span class="badge b-comb" title="Repostaje: ${fmtLitros(rp.litros)} a ${fmtPrecioL(rp.precioLitro)}">⛽ ${esc(v ? v.matricula : '')}</span>`); }
   const n = Store.list('adjuntos').filter(a => a.ownerId === m.id).length;
   if (n) out.push(`<span class="badge b-adj" title="${n} adjunto(s)">📎${n > 1 ? n : ''}</span>`);
   return out.join(' ');
@@ -562,6 +591,7 @@ function renderAll() {
   if (active === 'deudas') renderDeudas();
   if (active === 'inversiones') renderInversiones();
   if (active === 'garantias') renderGarantias();
+  if (active === 'vehiculos') renderVehiculos();
   if (active === 'ajustes') renderAjustes();
   renderBannerGarantias();
 }
@@ -579,14 +609,18 @@ function movTipo() { return $('#movForm').querySelector('input[name="tipo"]:chec
 function syncMovOpciones() {
   const f = $('#movForm'), gasto = movTipo() === 'gasto';
   $('#rowNaturaleza').hidden = !gasto; $('#rowTipoIngreso').hidden = gasto;
-  ['#optDeuda', '#optFin', '#optGar'].forEach(s => $(s).hidden = !gasto);
+  ['#optDeuda', '#optFin', '#optGar', '#optComb'].forEach(s => $(s).hidden = !gasto);
+  // un repostaje no es pago de deuda, ni compra financiada, ni recurrente
+  const comb = gasto && f.esComb.checked;
+  if (comb) { f.esPago.checked = false; f.esFin.checked = false; }
+  combSync();
   $('#optDeudaBody').hidden = !(gasto && f.esPago.checked);
   $('#optFinBody').hidden = !(gasto && f.esFin.checked);
   $('#optGarBody').hidden = !(gasto && f.esGar.checked);
   $('#optRecBody').hidden = !f.esRec.checked;
   // pago de deuda y compra financiada son incompatibles
-  f.esFin.disabled = f.esPago.checked; f.esPago.disabled = f.esFin.checked;
-  f.esRec.disabled = gasto && (f.esPago.checked || f.esFin.checked); if (f.esRec.disabled) f.esRec.checked = false;
+  f.esFin.disabled = f.esPago.checked || comb; f.esPago.disabled = f.esFin.checked || comb; f.esComb.disabled = f.esPago.checked || f.esFin.checked;
+  f.esRec.disabled = gasto && (f.esPago.checked || f.esFin.checked || comb); if (f.esRec.disabled) f.esRec.checked = false;
   if (gasto && f.esFin.checked) previewFin('#movFin', parseImporte(f.importe.value));
   if (gasto && f.esGar.checked) actualizarVenceGarantia();
   if (f.esRec.checked) $('#recInfo').textContent = f.fecha.value ? `Se creará automáticamente ${FC.textoDiaCobro(f.recUltimo.checked ? FC.DIA_ULTIMO : Number(f.fecha.value.slice(8)))}, a partir de ${monthLabel(monthKey(f.fecha.value))}.` : '';
@@ -654,6 +688,7 @@ function openMovDialog(mov, preset = {}) {
   $('#movDelete').style.display = mov ? '' : 'none';
   $('#ocrPanel').hidden = true; $('#ocrPanel').innerHTML = '';
   MovDlg.adj = AdjUI.abrir('#movAdj', { ownerType: 'movimiento', ownerId: mov?.id || uid() });
+  combAbrir(mov, preset);   // repostaje de combustible (vehiculos.js)
   syncMovOpciones();
   $('#movDialog').showModal(); setTimeout(() => f.importe.focus(), 30);
 }
@@ -662,6 +697,7 @@ $('#mCategoria').addEventListener('change', e => { // por defecto según la cate
   const f = $('#movForm');
   if (movTipo() === 'gasto' && !f.id.value) f.querySelector(`input[name="naturaleza"][value="${naturalezaPorDefecto(e.target.value)}"]`).checked = true;
   if (movTipo() === 'ingreso' && !f.id.value) f.tipoIngreso.value = tipoIngresoPorDefecto(e.target.value);
+  if (movTipo() === 'gasto' && !f.esComb.checked && FuelCore.esCategoriaCombustible(e.target.value) && !f.esPago.checked && !f.esFin.checked) { f.esComb.checked = true; syncMovOpciones(); }
 });
 ['esPago', 'esFin', 'esGar', 'esRec'].forEach(n => $('#movForm')[n].addEventListener('change', () => {
   const f = $('#movForm');
@@ -706,6 +742,20 @@ $('#movForm').addEventListener('submit', async e => {
     cambios.push({ col: 'recurrentes', rec });
   }
   if (!mov.id) mov.id = MovDlg.adj.owner.ownerId;
+  // Repostaje de combustible -> registro en «repostajes» enlazado a este gasto
+  delete mov.repostajeId;
+  if (gasto && f.esComb.checked) {
+    const r = combLeer(mov, importe);
+    if (r.error) return err(r.error);
+    if (r.confirmar && !confirm(r.confirmar)) return;
+    mov.repostajeId = r.rep.id;
+    if (!mov.descripcion) mov.descripcion = r.descripcion;
+    if (!Store.getCategorias('gasto').includes(mov.categoria)) { Store.state.categorias.gasto.push(mov.categoria); Store._touchCats(); }
+    cambios.push({ col: 'repostajes', rec: r.rep });
+  } else if (MovDlg.rep) {
+    if (!confirm('Has quitado «Repostaje»: se borrarán los datos de litros y km de este gasto (el gasto se conserva). ¿Continuar?')) return;
+    cambios.push({ col: 'repostajes', del: MovDlg.rep.id });
+  }
   // Compra financiada -> deuda
   if (gasto && f.esFin.checked) {
     const d = leerFinFields('#movFin');
@@ -734,7 +784,8 @@ async function confirmarBorrarMov(id) {
     if (!confirm('Esta compra está financiada. Se eliminará también su plan de pagos (las cuotas ya pagadas se conservan como gastos). ¿Eliminar?')) return false;
     await Store.apply([{ col: 'movimientos', del: id }, { col: 'deudas', del: m.financiadoPor }]); return true;
   }
-  const extra = m.recurrenteId ? '\n\nEs un movimiento recurrente: solo se elimina este mes (no se volverá a crear). Para dejar de generarlo, edita la plantilla en «Movimientos recurrentes».' : '';
+  const rp = repostajeDeMov(m);
+  const extra = rp ? '\n\nEs un repostaje: se borrarán también sus datos de litros y km.' : m.recurrenteId ? '\n\nEs un movimiento recurrente: solo se elimina este mes (no se volverá a crear). Para dejar de generarlo, edita la plantilla en «Movimientos recurrentes».' : '';
   if (!confirm('¿Eliminar este movimiento?' + extra)) return false;
   await Store.deleteMovimiento(id); return true;
 }
@@ -860,7 +911,7 @@ function generarDatosEjemplo(ym = UI.mes) {
     add('gasto', d(7), 35, 'Telefonía e internet', 'Fibra + móvil');
     for (let s = 0; s < 4; s++) add('gasto', d(3 + s * 7), 55 + rnd() * 45, 'Supermercado', ['Mercadona', 'HiperDino', 'Lidl', 'Alcampo'][s], s % 2 ? 'Tarjeta' : 'Banco');
     for (let s = 0; s < 3; s++) add('gasto', d(9 + s * 6), 15 + rnd() * 40, 'Restaurantes', ['Guachinche', 'Cena con amigos', 'Terraza'][s], 'Tarjeta');
-    add('gasto', d(10), 40 + rnd() * 30, 'Transporte', 'Gasolina', 'Tarjeta');
+    rnd();   // (antes: gasolina; ahora van como repostajes, más abajo)
     if (rnd() > .4) add('gasto', d(18), 20 + rnd() * 80, 'Ocio', 'Concierto / cine', 'Tarjeta');
     if (rnd() > .6) add('gasto', d(22), 30 + rnd() * 90, 'Ropa', 'Ropa', 'Tarjeta');
     if (i === 4) add('gasto', d(14), 420, 'Viajes', 'Vuelo a Madrid', 'Tarjeta');
@@ -896,10 +947,35 @@ function generarDatosEjemplo(ym = UI.mes) {
   op(btc, 'compra', FC.addMonthsISO(hoy, -16), 0.01, 38000, 1.5); op(btc, 'compra', FC.addMonthsISO(hoy, -8), 0.008, 61000, 1.5);
   op(btc, 'venta', FC.addMonthsISO(hoy, -1), 0.012, 89000, 2);
   precio(btc, FC.addDaysISO(hoy, -1), 92500);
-  return { movimientos: movs, recurrentes, deudas, activos, operaciones, precios };
+  // Vehículos y repostajes (v3.3): cada repostaje lleva su gasto en «Combustible»
+  const vehiculos = [
+    { id: uid(), matricula: '1234KLM', nombre: 'Seat León', combustible: 'gasoil', capacidad: 50, kmIniciales: 98500, activo: true, notas: '', creado: 1 },
+    { id: uid(), matricula: '5678HJT', nombre: 'Toyota Yaris', combustible: 'gasolina', capacidad: 42, kmIniciales: 41200, activo: true, notas: '', creado: 2 }
+  ];
+  const repostajes = [];
+  const repostar = (v, cada, l100, base, gasolineras) => {
+    let odo = v.kmIniciales, f = FC.addDaysISO(FC.addMonthsISO(`${desde}-01`, 0), v === vehiculos[0] ? 3 : 8), n = 0;
+    while (f <= hoy) {
+      const parcial = n % 7 === 5;
+      const km = Math.round(cada * (0.8 + rnd() * 0.4) * (parcial ? 0.45 : 1));
+      odo += km;
+      const precioLitro = Math.round((base + Math.sin(n / 3) * 0.06 + n * 0.002 + rnd() * 0.03) * 1000) / 1000;
+      const litros = round2(km * l100 * (0.93 + rnd() * 0.14) / 100);
+      const importe = round2(litros * precioLitro), gasolinera = gasolineras[n % gasolineras.length];
+      const m = add('gasto', f, importe, 'Combustible', `Combustible ${v.matricula} · ${gasolinera}`, 'Tarjeta', { naturaleza: 'variable' });
+      const r = { id: uid(), vehiculoId: v.id, movimientoId: m.id, fecha: f, precioLitro, litros, importe, kmTanqueAnterior: n === 0 ? null : km, odometro: odo, lleno: !parcial, gasolinera, creado: n };
+      m.repostajeId = r.id; repostajes.push(r);
+      f = FC.addDaysISO(f, parcial ? 6 : Math.round(cada / 45));
+      n++;
+    }
+  };
+  repostar(vehiculos[0], 620, 5.4, 1.38, ['Repsol', 'Cepsa', 'Shell']);
+  repostar(vehiculos[1], 480, 6.3, 1.49, ['BP', 'Disa']);
+  return { movimientos: movs, recurrentes, deudas, activos, operaciones, precios, vehiculos, repostajes };
 }
 $('#sampleBtn').addEventListener('click', async () => {
   if ((Store.getMovimientos().length || Store.list('activos').length) && !confirm('Se añadirán datos de ejemplo a los que ya tienes. ¿Continuar?')) return;
+  if (!Store.getCategorias('gasto').includes('Combustible')) await Store.addCategoria('gasto', 'Combustible');
   await Store.addMany(generarDatosEjemplo()); toast('Datos de ejemplo cargados'); showView('resumen');
 });
 $('#resetBtn').addEventListener('click', async () => {
