@@ -1,0 +1,5 @@
+﻿fecha;activo;tipo_activo;isin_ticker;operacion;participaciones;precio;comisiones;notas
+15/01/2024;Vanguard Global Stock Index;fondo;IE00B03HD191;compra;10,5234;190,05;0;Aportación de enero
+15/02/2024;Vanguard Global Stock Index;fondo;IE00B03HD191;compra;10,1200;197,63;0;
+03/05/2024;iShares Core MSCI World;etf;IWDA;compra;25;88,40;2,50;Broker
+10/09/2025;iShares Core MSCI World;etf;IWDA;venta;10;101,20;2,50;Venta parcial
