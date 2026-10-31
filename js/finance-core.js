@@ -71,7 +71,10 @@
    * la última cuota ajusta los céntimos para dejar el pendiente exactamente a 0.
    * Los intereses son por periodos mensuales (TIN/12), así que el día de cobro solo cambia las fechas.
    */
-  function cuadroAmortizacion({ principal, tin = 0, plazo, fechaPrimeraCuota = null, comisionMensual = 0, diaCobro = null }) {
+  function cuadroAmortizacion(deuda) {
+    return esManual(deuda) ? cuadroManual(deuda) : cuadroFrances(deuda);
+  }
+  function cuadroFrances({ principal, tin = 0, plazo, fechaPrimeraCuota = null, comisionMensual = 0, diaCobro = null }) {
     principal = Number(principal); plazo = Math.round(Number(plazo)); tin = Number(tin) || 0; comisionMensual = Number(comisionMensual) || 0;
     if (!(principal > 0) || !(plazo >= 1)) throw new Error('Importe y plazo deben ser mayores que 0');
     if (tin < 0) throw new Error('El TIN no puede ser negativo');
@@ -87,6 +90,84 @@
     }
     const totalIntereses = round2(totI), totalComisiones = round2(comisionMensual * plazo);
     return { cuota, filas, totalIntereses, totalComisiones, totalPagado: round2(principal + totalIntereses + totalComisiones) };
+  }
+
+  /* ---- Modo «Cuota manual» (v3.5): el usuario indica la cuota y el número de cuotas ---- */
+  const esManual = d => !!d && d.modo === 'manual';
+  /** Importe de la cuota n en modo manual: el editado para esa cuota o la cuota general. */
+  function importeCuotaManual(d, n) {
+    const ed = d.cuotasEditadas && d.cuotasEditadas[n];
+    return round2(ed !== undefined && ed !== null && Number(ed) > 0 ? Number(ed) : Number(d.cuotaManual));
+  }
+  /** Importes de todas las cuotas (modo manual). */
+  function pagosManual(d) {
+    const plazo = Math.round(Number(d.plazo));
+    return Array.from({ length: plazo }, (_, i) => importeCuotaManual(d, i + 1));
+  }
+  /** TIN implícito (% anual nominal, TIR mensual × 12) de un capital devuelto con esos pagos mensuales. NaN si no cuadra. */
+  function tinImplicito(principal, pagos) {
+    principal = Number(principal);
+    if (!(principal > 0) || !pagos.length) return NaN;
+    const total = pagos.reduce((a, b) => a + b, 0);
+    if (total < principal - 0.005) return NaN;   // las cuotas no llegan ni a devolver el capital
+    if (Math.abs(total - principal) < 0.005) return 0;
+    const i = tir([principal, ...pagos.map(x => -x)]);
+    return isFinite(i) && i >= 0 ? i * 1200 : NaN;
+  }
+  /**
+   * Cuadro con cuotas fijadas por el usuario. Si se conoce el capital (capitalConocido), se reparte
+   * cada cuota en intereses (pendiente × TIN/12) y capital, con el TIN indicado o, si no, el implícito;
+   * la última cuota se lleva el capital que quede. Sin capital, no hay desglose: el pendiente es la suma
+   * de las cuotas que faltan.
+   */
+  function cuadroManual(d) {
+    const plazo = Math.round(Number(d.plazo)), cuota = round2(Number(d.cuotaManual));
+    if (!(cuota > 0) || !(plazo >= 1)) throw new Error('Indica la cuota y el número de cuotas');
+    const pagos = pagosManual(d), total = round2(pagos.reduce((a, b) => a + b, 0));
+    const fecha = n => isISO(d.fechaPrimeraCuota) ? fechaCuota(d.fechaPrimeraCuota, n, d.diaCobro) : null;
+    const principal = round2(Number(d.principal) || 0);
+    const tinImp = d.capitalConocido === true && principal > 0 ? tinImplicito(principal, pagos) : NaN;
+    // Con capital, hace falta que las cuotas lo devuelvan (si no, no hay desglose posible)
+    const conCapital = d.capitalConocido === true && principal > 0 && isFinite(tinImp);
+    const filas = []; let totI = 0, tinUsado = null, tinNoCuadra = false, descuadreTIN = 0;
+    if (!conCapital) {
+      let pend = total;
+      pagos.forEach((pago, i) => { pend = round2(pend - pago); filas.push({ n: i + 1, fecha: fecha(i + 1), cuota: pago, interes: 0, amortizacion: pago, comision: 0, pago, pendiente: Math.max(0, pend) }); });
+    } else {
+      tinUsado = tinImp;
+      if (d.tinConocido === true) {
+        // ¿Cuadra el TIN indicado? Capital que quedaría tras pagar todas las cuotas con ese TIN.
+        const r = (Number(d.tin) || 0) / 1200; let p = principal;
+        pagos.forEach(pago => { p = p * (1 + r) - pago; });
+        descuadreTIN = round2(p);
+        if (Math.abs(descuadreTIN) <= 1 + principal * 0.002) tinUsado = Number(d.tin) || 0; else tinNoCuadra = true;
+      }
+      const r = tinUsado / 1200; let pend = principal;
+      pagos.forEach((pago, i) => {
+        const n = i + 1;
+        let interes = round2(pend * r), amort = round2(pago - interes);
+        if (n === plazo || amort > pend) { amort = pend; interes = Math.max(0, round2(pago - amort)); }
+        if (amort < 0) amort = 0;
+        pend = round2(pend - amort); totI += interes;
+        filas.push({ n, fecha: fecha(n), cuota: pago, interes, amortizacion: amort, comision: 0, pago, pendiente: pend });
+      });
+    }
+    return { cuota, filas, totalIntereses: round2(totI), totalComisiones: 0, totalPagado: total, modo: 'manual', capitalConocido: conCapital,
+      capitalNoCuadra: d.capitalConocido === true && principal > 0 && !conCapital,   // las cuotas no llegan a devolver el capital indicado
+      tinUsado: conCapital ? tinUsado : null, tinEsImplicito: conCapital && (d.tinConocido !== true || tinNoCuadra), tinNoCuadra, descuadreTIN,
+      cuotasEditadas: pagos.filter(p => p !== cuota).length };
+  }
+  /**
+   * Campos de compatibilidad de una deuda manual: las versiones anteriores a la 3.5 solo entienden
+   * principal/TIN/plazo (cuota francesa). Se guardan valores que dan (casi) las mismas cuotas:
+   * sin capital, principal = suma de las cuotas y TIN 0; con capital y sin TIN, el TIN implícito
+   * (con TIN indicado se guarda el del usuario).
+   */
+  function compatManual(d) {
+    const c = cuadroManual(d);
+    // Con TIN indicado se respeta el del usuario; si no, el implícito (cuota francesa equivalente).
+    if (c.capitalConocido) return { principal: round2(Number(d.principal)), tin: d.tinConocido === true ? Number(d.tin) || 0 : Math.round(c.tinUsado * 10000) / 10000 };
+    return { principal: c.totalPagado, tin: 0 };
   }
 
   /** TIR por periodo de una serie de flujos (índice = periodo). Bisección robusta. */
@@ -115,7 +196,8 @@
   /** Todo lo que la app necesita de una deuda: cuadro, TAE y estado según las cuotas pagadas. */
   function resumenDeuda(deuda, cuotasPagadas = [], hoy = null) {
     const cuadro = cuadroAmortizacion(deuda);
-    const tae = calcularTAE({ principal: deuda.principal, comisionApertura: deuda.comisionApertura, filas: cuadro.filas });
+    const sinCapital = esManual(deuda) && !cuadro.capitalConocido;
+    const tae = sinCapital ? NaN : calcularTAE({ principal: deuda.principal, comisionApertura: deuda.comisionApertura, filas: cuadro.filas });
     const pagadas = new Set(cuotasPagadas.map(Number));
     const pendientes = cuadro.filas.filter(f => !pagadas.has(f.n));
     const pagadasFilas = cuadro.filas.filter(f => pagadas.has(f.n));
@@ -124,6 +206,7 @@
     const interesesPagados = round2(pagadasFilas.reduce((s, f) => s + f.interes, 0));
     const taeIntro = deuda.taeIntroducida === null || deuda.taeIntroducida === undefined || deuda.taeIntroducida === '' ? null : Number(deuda.taeIntroducida) / 100;
     return {
+      modo: esManual(deuda) ? 'manual' : 'calculado', capitalConocido: !sinCapital,
       ...cuadro, tae, taeIntroducida: taeIntro,
       diferenciaTAE: taeIntro === null || !isFinite(tae) ? null : taeIntro - tae,
       totalCoste: round2(cuadro.totalIntereses + cuadro.totalComisiones + (Number(deuda.comisionApertura) || 0)),
@@ -542,7 +625,7 @@
   const api = {
     round2, isISO, daysInMonth, addMonthsISO, addYearsISO, addDaysISO, diffDays, ymAdd, fechaEnMes,
     DIA_ULTIMO, normalizarDiaCobro, fechaCobroEnMes, fechaCuota, textoDiaCobro,
-    cuotaFrancesa, cuadroAmortizacion, tir, calcularTAE, resumenDeuda,
+    cuotaFrancesa, cuadroAmortizacion, cuadroFrances, cuadroManual, esManual, importeCuotaManual, pagosManual, tinImplicito, compatManual, tir, calcularTAE, resumenDeuda,
     fifo, carteraFIFO, erroresNuevos, cuadreTraspasoFondos, ordenarOperaciones, ultimoPrecio, metricasActivo, metricasCartera, disponibleEn, disponibleActivo,
     idRecurrente, periodosRecurrente, generarRecurrentes,
     GARANTIA_ANIOS_DEFECTO, vencimientoGarantia, estadoGarantia, urlGoogleCalendar,

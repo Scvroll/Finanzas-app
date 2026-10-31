@@ -46,7 +46,10 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 ### Deudas y compras financiadas
 - Al apuntar un gasto puedes marcar **«Compra financiada»** (tarjeta, financiación de tienda, préstamo): importe, **TIN**, número de cuotas, comisión de apertura y fecha de la primera cuota.
 - **Día de cobro** de cada deuda: un **día fijo del mes** (1 a 31) o **«Último día del mes»** (hay cosas que se cobran a final de mes y otras a principio). Con un día fijo, si el mes es más corto se usa su último día (día 31 → 28 o 29 de febrero, 30 de abril; al mes siguiente vuelve al 31). La 1.ª cuota vence en el mes que indiques, en ese día. El día de cobro se usa en el cuadro de amortización, las próximas cuotas, los avisos de cuotas vencidas, «Marcar pagadas hasta hoy» y la fecha de los gastos «pago de deuda» que se crean. Los intereses se calculan por meses (TIN/12), así que el día de cobro solo cambia las fechas, no los importes. Las deudas creadas con versiones anteriores toman como día de cobro el día de su primera cuota (las fechas no cambian).
-- La app calcula la **cuota (sistema francés)**, el **cuadro de amortización**, el total de intereses y la **TAE** (incluye la comisión).
+- **Dos formas de introducir una deuda (v3.5)**, con el selector «¿Cómo quieres introducir la deuda?» (en ＋ Nueva deuda y en la compra financiada):
+  - **Calcular cuotas:** indicas importe financiado, **TIN**, plazo y comisiones, y la app calcula la **cuota (sistema francés)**, el **cuadro de amortización**, el total de intereses y la **TAE** (incluye la comisión).
+  - **Cuota manual:** indicas la **cuota** que te cobran, la **fecha del primer cobro** y el **día de cobro**, y el **nº de cuotas** o la **fecha de la última cuota** (se rellenan el uno al otro). **Capital prestado, TIN y TAE son opcionales.** Sin capital, lo pendiente es la suma de las cuotas que faltan. Con capital, la app calcula el **TIN implícito** y la **TAE** y desglosa cada cuota en intereses y capital (si el TIN que indicas no cuadra con capital y cuotas, avisa y usa el implícito; si las cuotas suman menos que el capital, no deja guardar). En **«Editar cuotas una a una»** puedes poner otro importe a cuotas concretas (p. ej. la primera o la última).
+  - Al editar una deuda puedes cambiar de modo. Las deudas de versiones anteriores siguen en «Calcular cuotas», sin cambios.
 - **Cómo cuenta en el resumen:** la compra financiada **no** suma como gasto del mes (no salió ese dinero); lo que cuenta son las **cuotas** a medida que las pagas. Botón **«Marcar pagadas hasta hoy»** para crear de golpe los movimientos de las cuotas vencidas (cada uno con su desglose de intereses).
 - También puedes crear deudas sueltas (préstamo, coche…) con **＋ Nueva deuda**, sin ligarlas a una compra.
 
@@ -148,6 +151,8 @@ Esquema (versión 3, resumido):
                   repostajeId, traspasoId, updatedAt }],   // repostajeId: gastos de combustible (v3.3); traspasoId: comisión de un traspaso (v3.4)
   recurrentes: [{ id, tipo, importe, categoria, dia: 1..31|'ultimo', desde: 'AAAA-MM', hasta, activo, ... }],
   deudas:      [{ id, nombre, categoria, fechaPrimeraCuota, diaCobro: 1..31|'ultimo', ... }],   // + importe financiado, TIN, plazo, comisión
+               // v3.5, solo en «Cuota manual»: modo: 'manual', cuotaManual, cuotasEditadas: { n: importe }, capitalConocido, tinConocido
+               // (principal y tin se guardan también, como capital/TIN implícito o total de cuotas con TIN 0, para que la v3.4 las siga abriendo)
   adjuntos:    [{ id, nombre, driveId, ocr, ... }],   // metadatos; el archivo va aparte (IndexedDB / Drive)
   activos:     [{ id, nombre, tipo, isin, ticker, ... }],
   operaciones: [...],                     // compras y ventas de cada activo (+ cuentaId opcional, v3.4)

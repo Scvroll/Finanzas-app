@@ -75,9 +75,13 @@
       const pagadas = movs.filter(m => m.deudaId === d.id && m.cuotaN).map(m => m.cuotaN);
       const s = FC.resumenDeuda(d, pagadas, hoy);
       return {
-        id: d.id, nombre: d.nombre, medio: d.medio, principal: r2(d.principal), tinPct: Number(d.tin) || 0, plazoMeses: d.plazo, fechaPrimeraCuota: d.fechaPrimeraCuota, diaCobro: FC.normalizarDiaCobro(d.diaCobro, d.fechaPrimeraCuota), categoria: d.categoria || '',
+        id: d.id, nombre: d.nombre, medio: d.medio, modo: s.modo, ...(s.modo === 'manual' ? {
+          cuotaManual: r2(d.cuotaManual), cuotasEditadas: d.cuotasEditadas || {}, capitalConocido: !!s.capitalConocido, tinImplicito: !!s.tinEsImplicito,
+          nota: s.capitalConocido ? 'Cuotas indicadas por el usuario; intereses calculados con el TIN ' + (s.tinEsImplicito ? 'implícito' : 'indicado') : 'Cuotas indicadas por el usuario; capital y TIN desconocidos: sin desglose de intereses, el pendiente es la suma de cuotas restantes' } : {}),
+        principal: s.modo === 'manual' && !s.capitalConocido ? null : r2(d.principal),
+        tinPct: s.modo === 'manual' ? (s.capitalConocido ? Math.round(s.tinUsado * 100) / 100 : null) : Number(d.tin) || 0, plazoMeses: d.plazo, fechaPrimeraCuota: d.fechaPrimeraCuota, diaCobro: FC.normalizarDiaCobro(d.diaCobro, d.fechaPrimeraCuota), categoria: d.categoria || '',
         comisionApertura: r2(d.comisionApertura), comisionMensual: r2(d.comisionMensual), taeIntroducidaPct: s.taeIntroducida === null ? null : r2(s.taeIntroducida * 100),
-        taeCalculadaPct: isFinite(s.tae) ? Math.round(s.tae * 10000) / 100 : null, cuota: r2(s.cuota), totalIntereses: r2(s.totalIntereses), totalCoste: r2(s.totalCoste), totalPagado: r2(s.totalPagado),
+        taeCalculadaPct: isFinite(s.tae) ? Math.round(s.tae * 10000) / 100 : null, cuota: r2(s.cuota), totalIntereses: s.modo === 'manual' && !s.capitalConocido ? null : r2(s.totalIntereses), totalCoste: s.modo === 'manual' && !s.capitalConocido ? null : r2(s.totalCoste), totalPagado: r2(s.totalPagado),
         cuotasPagadas: s.pagadas, cuotasRestantes: s.restantes, capitalPendiente: s.pendiente, interesesPendientes: s.interesesPendientes, interesesPagados: s.interesesPagados,
         cuotasVencidasSinMarcar: s.vencidas.length, terminada: s.terminada, movimientoCompraId: d.movimientoId || null,
         cuadro: s.filas.map(f => ({ n: f.n, fecha: f.fecha, cuota: r2(f.pago), interes: r2(f.interes), amortizacion: r2(f.amortizacion), comision: r2(f.comision), pendiente: r2(f.pendiente), pagada: pagadas.includes(f.n) }))

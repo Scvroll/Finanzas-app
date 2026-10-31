@@ -282,7 +282,7 @@ function renderDeudas() {
     return `<div class="card deuda ${r.terminada ? 'terminada' : ''}">
       <div class="deuda-head">
         <div><h3>${esc(d.nombre)} ${r.terminada ? '<span class="badge b-ok">Pagada</span>' : ''}</h3>
-          <div class="muted small">${MEDIOS_FIN[d.medio]} · ${eur(d.principal)} a ${d.plazo} meses · TIN ${fmtNum.format(d.tin)} % · TAE ${pct(r.tae)}${r.taeIntroducida !== null ? ` (indicada ${pct(r.taeIntroducida)})` : ''}</div>
+          <div class="muted small">${lineaCondiciones(d, r)}</div>
           <div class="muted small deu-cobro">📅 Se cobra ${FC.textoDiaCobro(d.diaCobro)}</div></div>
         <div class="actions"><button class="btn-sm" data-deu-cuadro="${d.id}">📋 Cuadro</button> <button class="btn-sm" data-deu-edit="${d.id}" title="Editar">✏️</button> <button class="btn-sm btn-danger" data-deu-del="${d.id}" title="Eliminar">🗑️</button></div>
       </div>
@@ -291,15 +291,23 @@ function renderDeudas() {
         <div><span>Pendiente</span><strong>${eur(r.pendiente)}</strong></div>
         <div><span>Cuotas restantes</span><strong>${r.restantes} de ${r.filas.length}</strong></div>
         <div><span>Cuota</span><strong>${eur(r.cuota + d.comisionMensual)}</strong></div>
-        <div><span>Intereses pendientes</span><strong>${eur(r.interesesPendientes)}</strong></div>
-        <div><span>Intereses totales</span><strong>${eur(r.totalIntereses)}</strong></div>
+        <div><span>Intereses pendientes</span><strong>${sinDesglose(r) ? '—' : eur(r.interesesPendientes)}</strong></div>
+        <div><span>Intereses totales</span><strong>${sinDesglose(r) ? '—' : eur(r.totalIntereses)}</strong></div>
       </div>
       ${r.vencidas.length ? `<div class="notice warn">⏰ ${r.vencidas.length === 1 ? 'Hay 1 cuota vencida' : `Hay ${r.vencidas.length} cuotas vencidas`} sin marcar como pagada. <button class="btn-sm btn-primary" data-deu-pagar-hasta="${d.id}">Marcar pagadas hasta hoy</button></div>` : ''}
       ${r.proximas.length ? `<div class="table-wrap"><table class="compact"><thead><tr><th>Próximas cuotas</th><th>Fecha</th><th class="num">Cuota</th><th class="num">Intereses</th><th class="num">Capital</th><th></th></tr></thead><tbody>
-        ${r.proximas.map(f => `<tr><td>${f.n}/${r.filas.length}</td><td>${fmtFecha(f.fecha)}${f.fecha <= todayISO() ? ' <span class="badge b-warn">vencida</span>' : ''}</td><td class="num">${eur(f.pago)}</td><td class="num">${eur(f.interes)}</td><td class="num">${eur(f.amortizacion)}</td><td class="actions"><button class="btn-sm" data-deu-pagar="${d.id}" data-n="${f.n}">✔ Pagada</button></td></tr>`).join('')}
+        ${r.proximas.map(f => `<tr><td>${f.n}/${r.filas.length}</td><td>${fmtFecha(f.fecha)}${f.fecha <= todayISO() ? ' <span class="badge b-warn">vencida</span>' : ''}</td><td class="num">${eur(f.pago)}</td><td class="num">${sinDesglose(r) ? '—' : eur(f.interes)}</td><td class="num">${sinDesglose(r) ? '—' : eur(f.amortizacion)}</td><td class="actions"><button class="btn-sm" data-deu-pagar="${d.id}" data-n="${f.n}">✔ Pagada</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
     </div>`;
   }).join('') : '<div class="card empty">No tienes deudas ni compras a plazos. Al añadir un gasto, marca «Compra financiada» o pulsa «＋ Nueva deuda».</div>';
+}
+/** Deuda en modo «Cuota manual» sin capital conocido: no hay desglose intereses/capital. */
+const sinDesglose = r => r.modo === 'manual' && !r.capitalConocido;
+function lineaCondiciones(d, r) {
+  if (r.modo !== 'manual') return `${MEDIOS_FIN[d.medio]} · ${eur(d.principal)} a ${d.plazo} meses · TIN ${fmtNum.format(d.tin)} % · TAE ${pct(r.tae)}${r.taeIntroducida !== null ? ` (indicada ${pct(r.taeIntroducida)})` : ''}`;
+  const base = `${MEDIOS_FIN[d.medio]} · Cuota manual: ${d.plazo} cuotas de ${eur(d.cuotaManual)}${r.cuotasEditadas ? ` (${r.cuotasEditadas} con otro importe)` : ''}`;
+  if (sinDesglose(r)) return `${base} · capital y TIN no indicados`;
+  return `${base} · capital ${eur(d.principal)} · TIN ${r.tinEsImplicito ? 'implícito ' : ''}${fmtTIN(r.tinUsado)} · TAE ${pct(r.tae)}${r.taeIntroducida !== null ? ` (indicada ${pct(r.taeIntroducida)})` : ''}`;
 }
 function cuotaComoMovimiento(d, f) {
   return { id: `cuota_${d.id}_${f.n}`, tipo: 'gasto', fecha: f.fecha, importe: f.pago, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', ...(d.cuentaId ? { cuentaId: d.cuentaId } : {}),
@@ -321,17 +329,21 @@ function openCuadro(deudaId) {
   const d = Store.get('deudas', deudaId); if (!d) return;
   const r = Calc.deuda(d), pagadas = new Set(r.pagos.map(p => p.cuotaN)), com = r.totalComisiones > 0;
   $('#cuadroTitulo').textContent = 'Cuadro de amortización · ' + d.nombre;
+  const manual = r.modo === 'manual', sd = sinDesglose(r), e2 = v => sd ? '—' : eur(v);
   $('#cuadroResumen').innerHTML = `<div class="fin-kpis">
-    <div><span>Importe financiado</span><strong>${eur(d.principal)}</strong></div><div><span>Cuota</span><strong>${eur(r.cuota + d.comisionMensual)}</strong></div>
-    <div><span>Total intereses</span><strong>${eur(r.totalIntereses)}</strong></div><div><span>Comisiones</span><strong>${eur(r.totalComisiones + d.comisionApertura)}</strong></div>
-    <div><span>Total a pagar</span><strong>${eur(r.totalPagado + d.comisionApertura)}</strong></div><div><span>TIN / TAE calculada</span><strong>${fmtNum.format(d.tin)} % / ${pct(r.tae)}</strong></div></div>
-    ${r.taeIntroducida !== null ? `<p class="small muted">TAE indicada por la entidad: ${pct(r.taeIntroducida)} (diferencia ${(r.diferenciaTAE * 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })} puntos).</p>` : ''}
-    <p class="small muted">Sistema francés: cuota constante; al principio pagas más intereses y al final más capital. Al marcar una cuota como pagada se crea un gasto «pago de deuda» con su desglose.</p>`;
+    <div><span>${manual ? 'Capital prestado' : 'Importe financiado'}</span><strong>${sd ? 'No indicado' : eur(d.principal)}</strong></div><div><span>Cuota</span><strong>${eur(r.cuota + d.comisionMensual)}</strong></div>
+    <div><span>Total intereses</span><strong>${e2(r.totalIntereses)}</strong></div><div><span>Comisiones</span><strong>${eur(r.totalComisiones + d.comisionApertura)}</strong></div>
+    <div><span>Total a pagar</span><strong>${eur(r.totalPagado + d.comisionApertura)}</strong></div><div><span>TIN${manual && r.tinEsImplicito ? ' implícito' : ''} / TAE calculada</span><strong>${sd ? '— / —' : `${manual ? fmtTIN(r.tinUsado) : fmtNum.format(d.tin) + ' %'} / ${pct(r.tae)}`}</strong></div></div>
+    ${r.taeIntroducida !== null && isFinite(r.tae) ? `<p class="small muted">TAE indicada por la entidad: ${pct(r.taeIntroducida)} (diferencia ${(r.diferenciaTAE * 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })} puntos).</p>` : ''}
+    <p class="small muted">${!manual ? 'Sistema francés: cuota constante; al principio pagas más intereses y al final más capital.'
+      : sd ? 'Cuota manual: las cuotas son las que indicaste. Sin capital prestado no hay desglose de intereses; lo pendiente es la suma de las cuotas que faltan.'
+      : `Cuota manual: las cuotas son las que indicaste; los intereses de cada una se calculan sobre el capital pendiente con el TIN ${r.tinEsImplicito ? 'implícito' : 'indicado'}.`} Al marcar una cuota como pagada se crea un gasto «pago de deuda»${sd ? '' : ' con su desglose'}.</p>
+    ${r.tinNoCuadra ? `<p class="small warn-txt">Con el TIN indicado (${fmtTIN(d.tin)}) las cuotas no cuadran con el capital; se usa el TIN implícito.</p>` : ''}`;
   $('#cuadroBody').innerHTML = r.filas.map(f => `<tr class="${pagadas.has(f.n) ? 'pagada' : f.fecha <= todayISO() ? 'vencida' : ''}">
-    <td>${f.n}</td><td>${fmtFecha(f.fecha)}</td><td class="num">${eur(f.pago)}</td><td class="num">${eur(f.interes)}</td><td class="num">${eur(f.amortizacion)}</td>${com ? `<td class="num">${eur(f.comision)}</td>` : ''}<td class="num">${eur(f.pendiente)}</td>
+    <td>${f.n}</td><td>${fmtFecha(f.fecha)}</td><td class="num">${eur(f.pago)}</td><td class="num">${e2(f.interes)}</td><td class="num">${e2(f.amortizacion)}</td>${com ? `<td class="num">${eur(f.comision)}</td>` : ''}<td class="num">${eur(f.pendiente)}</td>
     <td class="actions">${pagadas.has(f.n) ? `<button class="btn-sm" data-deu-despagar="${d.id}" data-n="${f.n}" title="Desmarcar">✔ Pagada</button>` : `<button class="btn-sm" data-deu-pagar="${d.id}" data-n="${f.n}">Marcar pagada</button>`}</td></tr>`).join('');
   $('#cuadroHead').innerHTML = `<tr><th>#</th><th>Fecha</th><th class="num">Cuota</th><th class="num">Intereses</th><th class="num">Capital</th>${com ? '<th class="num">Comisión</th>' : ''}<th class="num">Pendiente</th><th></th></tr>`;
-  $('#cuadroFoot').innerHTML = `<tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${eur(r.totalPagado)}</strong></td><td class="num"><strong>${eur(r.totalIntereses)}</strong></td><td class="num"><strong>${eur(d.principal)}</strong></td>${com ? `<td class="num">${eur(r.totalComisiones)}</td>` : ''}<td></td><td></td></tr>`;
+  $('#cuadroFoot').innerHTML = `<tr><td colspan="2"><strong>Total</strong></td><td class="num"><strong>${eur(r.totalPagado)}</strong></td><td class="num"><strong>${e2(r.totalIntereses)}</strong></td><td class="num"><strong>${e2(d.principal)}</strong></td>${com ? `<td class="num">${eur(r.totalComisiones)}</td>` : ''}<td></td><td></td></tr>`;
   $('#cuadroDialog').dataset.deuda = d.id;
   if (!$('#cuadroDialog').open) $('#cuadroDialog').showModal();
 }
@@ -354,7 +366,8 @@ $('#deudaForm').addEventListener('submit', async e => {
   const viejo = Store.get('deudas', f.id.value);
   if (viejo) {
     const pag = Calc.deuda(viejo).pagos.length;
-    const cambiaCuadro = ['principal', 'tin', 'plazo', 'fechaPrimeraCuota', 'diaCobro', 'comisionMensual'].some(k => viejo[k] !== fin[k]);
+    const cambiaCuadro = ['principal', 'tin', 'plazo', 'fechaPrimeraCuota', 'diaCobro', 'comisionMensual', 'cuotaManual', 'capitalConocido', 'tinConocido'].some(k => (viejo[k] ?? null) !== (fin[k] ?? null))
+      || (viejo.modo || 'calculado') !== fin.modo || JSON.stringify(viejo.cuotasEditadas || {}) !== JSON.stringify(fin.cuotasEditadas || {});
     if (pag && cambiaCuadro && !confirm('Cambiar las condiciones recalcula el cuadro. Las cuotas ya marcadas como pagadas conservan el importe y el desglose con que se registraron. ¿Continuar?')) return;
   }
   delete fin.error;
