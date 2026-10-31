@@ -2,9 +2,10 @@
    «Copia para análisis» (OPCIONAL, desactivada por defecto)
    Escribe en una carpeta VISIBLE del Google Drive del usuario
    («Finanzas App - Análisis») una copia legible de sus datos:
-     - finanzas-analisis.json  (movimientos, deudas con cuadro, inversiones
-                                con resultados FIFO, garantías, vehículos y
-                                repostajes con consumos, resúmenes)
+     - finanzas-analisis.json  (movimientos, cuentas con saldos, traspasos,
+                                deudas con cuadro, inversiones con resultados
+                                FIFO y traspasos entre fondos, garantías,
+                                vehículos y repostajes con consumos, resúmenes)
      - movimientos.csv         (coma, punto decimal, fechas ISO)
    Permiso: drive.file (solo archivos creados por la app), pedido de forma
    incremental únicamente cuando el usuario activa la opción.
@@ -15,6 +16,7 @@
   'use strict';
   const FC = root.FinanceCore || (typeof require === 'function' ? require('./finance-core.js') : null);
   const Fuel = root.FuelCore || (typeof require === 'function' ? require('./fuel-core.js') : null);
+  const CC = root.CuentasCore || (typeof require === 'function' ? require('./cuentas-core.js') : null);
   const r2 = n => Math.round((Number(n) || 0) * 100) / 100;
   const vivos = l => (l || []).filter(x => x && !x.deleted);
   const ym = f => String(f || '').slice(0, 7);
@@ -24,13 +26,18 @@
     const movs = vivos(estado.movimientos).slice().sort((a, b) => a.fecha.localeCompare(b.fecha) || String(a.id).localeCompare(String(b.id)));
     const deudasArr = vivos(estado.deudas), activos = vivos(estado.activos), ops = vivos(estado.operaciones), precios = vivos(estado.precios);
     const adj = vivos(estado.adjuntos);
+    // v3.4: cuentas, traspasos, ajustes y traspasos entre fondos (las copias antiguas no los traen)
+    const cuentasArr = vivos(estado.cuentas), traspasosArr = vivos(estado.traspasos), regsArr = vivos(estado.regularizaciones), tfsArr = vivos(estado.traspasosFondos);
+    const idxCu = CC.indice(cuentasArr);
     const nAdj = id => adj.filter(a => a.ownerId === id).length;
 
     const repDeMovPre = {}, vehPre = {};
     for (const r of vivos(estado.repostajes)) if (r.movimientoId) repDeMovPre[r.movimientoId] = r;
     for (const v of vivos(estado.vehiculos)) vehPre[v.id] = v;
     const movimientos = movs.map(m => {
-      const o = { id: m.id, fecha: m.fecha, tipo: m.tipo, importe: r2(m.importe), categoria: m.categoria, descripcion: m.descripcion || '', cuenta: m.cuenta || '' };
+      const cu = CC.resolver(m, idxCu);
+      const o = { id: m.id, fecha: m.fecha, tipo: m.tipo, importe: r2(m.importe), categoria: m.categoria, descripcion: m.descripcion || '', cuenta: cu ? cu.nombre : (m.cuentaId ? '' : m.cuenta || ''), cuentaId: cu ? cu.id : null };
+      if (m.traspasoId) o.comisionDeTraspasoId = m.traspasoId;
       if (m.tipo === 'gasto') o.naturaleza = m.naturaleza || 'variable'; else o.tipoIngreso = m.tipoIngreso || 'otro';
       if (m.recurrenteId) o.recurrenteId = m.recurrenteId;
       if (m.deudaId) { o.deudaId = m.deudaId; o.cuotaN = m.cuotaN; if (m.desglose) o.desgloseCuota = m.desglose; }
@@ -50,8 +57,14 @@
       else if (m.financiadoPor) r.compraFinanciada += m.importe;
       else { r.gastos += m.importe; if (m.naturaleza === 'fijo') r.gastosFijos += m.importe; else r.gastosVariables += m.importe; if (m.deudaId) { r.cuotasDeuda += m.importe; r.interesesDeuda += (m.desglose && m.desglose.interes) || 0; } }
     }
+    // Dinero invertido (compras − ventas) y traspasos: NO son gasto ni ingreso
+    const vacioMes = k => ({ mes: k, ingresos: 0, gastos: 0, gastosFijos: 0, gastosVariables: 0, nomina: 0, ingresosExtra: 0, otrosIngresos: 0, cuotasDeuda: 0, interesesDeuda: 0, compraFinanciada: 0 });
+    for (const op of ops) { const k = ym(op.fecha); meses[k] = meses[k] || vacioMes(k); }
+    for (const t of traspasosArr) { const k = ym(t.fecha); meses[k] = meses[k] || vacioMes(k); }
     const resumenMensual = Object.values(meses).sort((a, b) => a.mes.localeCompare(b.mes)).map(r => {
       for (const k of Object.keys(r)) if (k !== 'mes') r[k] = r2(r[k]);
+      const inv = CC.invertidoPeriodo(ops, r.mes), tp = CC.traspasosPeriodo(traspasosArr, r.mes);
+      Object.assign(r, { comprasInversion: inv.compras, ventasInversion: inv.ventas, dineroInvertidoNeto: inv.neto, traspasosEntreCuentas: tp.n, importeTraspasado: tp.importe });
       r.ahorro = r2(r.ingresos - r.gastos); r.tasaAhorro = r.ingresos > 0 ? Math.round((r.ahorro / r.ingresos) * 10000) / 10000 : null;
       return r;
     });
@@ -71,18 +84,22 @@
       };
     });
 
+    const metricas = new Map(FC.metricasCartera(activos, ops, precios, tfsArr).map(x => [x.activo.id, x]));
+    const origenLote = l => l.origen ? { origenTraspasoId: l.origen.traspasoId, procedenteDe: l.origen.activoId, fechaTraspaso: l.origen.fecha } : {};
     const activosOut = activos.map(a => {
       const o = ops.filter(x => x.activoId === a.id), p = precios.filter(x => x.activoId === a.id);
-      const m = FC.metricasActivo(o, p);
+      const m = metricas.get(a.id);
       return {
         id: a.id, nombre: a.nombre, tipo: a.tipo, isin: a.isin || '', ticker: a.ticker || '',
         participaciones: m.participaciones, costeMedio: Math.round(m.costeMedio * 10000) / 10000, costeRestante: m.costeRestante, aportadoNeto: m.aportadoNeto,
         precio: m.precio, fechaPrecio: m.fechaPrecio, precioDeUltimaOperacion: m.precioDeOperacion, valor: m.valor, gananciaNoRealizada: m.noRealizada,
         gananciaNoRealizadaPct: m.noRealizadaPct === null ? null : Math.round(m.noRealizadaPct * 10000) / 100,
         gananciaRealizada: m.gananciaRealizada, realizadaPorAnio: m.realizadaPorAnio,
-        lotesVivos: m.lotes.map(l => ({ compraId: l.opId, fecha: l.fecha, participaciones: l.participaciones, iniciales: l.iniciales, coste: l.coste, costeUnitario: Math.round(l.costeUnitario * 10000) / 10000 })),
-        ventas: m.ventas.map(v => ({ ventaId: v.opId, fecha: v.fecha, participaciones: v.participaciones, precio: v.precio, comisiones: v.comisiones, importeNeto: v.importeNeto, costeFIFO: v.coste, ganancia: v.ganancia, lotesConsumidos: v.consumos.map(c => ({ compraId: c.compraId, fechaCompra: c.fecha, participaciones: c.participaciones, coste: c.coste })) })),
-        operaciones: FC.ordenarOperaciones(o).map(x => ({ id: x.id, fecha: x.fecha, tipo: x.tipo, participaciones: Number(x.participaciones), precio: Number(x.precio), comisiones: Number(x.comisiones) || 0, notas: x.notas || '' })),
+        lotesVivos: m.lotes.map(l => ({ compraId: l.opId, fecha: l.fecha, participaciones: l.participaciones, iniciales: l.iniciales, coste: l.coste, costeUnitario: Math.round(l.costeUnitario * 10000) / 10000, ...origenLote(l) })),
+        ventas: m.ventas.map(v => ({ ventaId: v.opId, fecha: v.fecha, participaciones: v.participaciones, precio: v.precio, comisiones: v.comisiones, importeNeto: v.importeNeto, costeFIFO: v.coste, ganancia: v.ganancia, lotesConsumidos: v.consumos.map(c => ({ compraId: c.compraId, fechaCompra: c.fecha, participaciones: c.participaciones, coste: c.coste, ...origenLote(c) })) })),
+        operaciones: FC.ordenarOperaciones(o).map(x => ({ id: x.id, fecha: x.fecha, tipo: x.tipo, participaciones: Number(x.participaciones), precio: Number(x.precio), comisiones: Number(x.comisiones) || 0, notas: x.notas || '', cuentaId: x.cuentaId || null })),
+        traspasosEntrada: (m.traspasosEntrada || []).map(t => ({ traspasoId: t.traspasoId, fecha: t.fecha, desde: t.origenId, participacionesRecibidas: t.participaciones, costeHeredado: t.coste })),
+        traspasosSalida: (m.traspasosSalida || []).map(t => ({ traspasoId: t.traspasoId, fecha: t.fecha, hacia: t.destinoId, participacionesEntregadas: t.participaciones, costeTraspasado: t.coste })),
         historialPrecios: p.slice().sort((a2, b) => a2.fecha.localeCompare(b.fecha)).map(x => ({ fecha: x.fecha, precio: x.precio })),
         errores: m.errores
       };
@@ -114,22 +131,43 @@
     const combustible = { metodo: 'Consumo «lleno a lleno»: litros y euros repostados desde el último depósito lleno hasta el siguiente (incluidos los parciales) ÷ km recorridos en ese tramo. Si no hay dos llenos seguidos: aproximado con litros del repostaje anterior ÷ km. €/L medio ponderado por litros. €/km solo incluye combustible.',
       totales: metr(res.total), porMes: Fuel.porMes(vehs, reps, {}), porAnio: Fuel.porAnio(vehs, reps) };
 
-    const recurrentes = vivos(estado.recurrentes).map(r => ({ id: r.id, tipo: r.tipo, descripcion: r.descripcion, categoria: r.categoria, importe: r2(r.importe), dia: r.dia, desde: r.desde, hasta: r.hasta || '', activo: r.activo !== false, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso }));
+    const recurrentes = vivos(estado.recurrentes).map(r => { const cu = CC.resolver(r, idxCu); return { id: r.id, tipo: r.tipo, descripcion: r.descripcion, categoria: r.categoria, importe: r2(r.importe), dia: r.dia, desde: r.desde, hasta: r.hasta || '', activo: r.activo !== false, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso, cuentaId: cu ? cu.id : null }; });
+
+    // Cuentas y saldos (v3.4)
+    const sal = CC.saldos({ cuentas: cuentasArr, movimientos: movs, traspasos: traspasosArr, regularizaciones: regsArr, operaciones: ops, activos }, hoy);
+    const cuentas = sal.lista.map(x => {
+      const c = x.cuenta, fl = sal.flujos.filter(f => f.cuentaId === c.id);
+      const desde = fl.length ? ym(fl[0].fecha) : ym(hoy);
+      return { id: c.id, nombre: c.nombre, tipo: c.tipo, entidad: c.entidad || '', ibanUltimos4: c.iban || '', activa: c.activa !== false, saldoInicial: r2(c.saldoInicial), fechaSaldoInicial: c.fechaSaldo,
+        saldoHoy: x.saldo, saldoConApuntesFuturos: x.saldoFinal, ingresos: x.ingresos, gastos: x.gastos, traspasosEntrada: x.traspasosEntrada, traspasosSalida: x.traspasosSalida,
+        comprasInversion: x.compras, ventasInversion: x.ventas, ajustes: x.ajustes, apuntes: x.n, saldoFinDeMes: CC.serieMensual(c, sal.flujos, desde, ym(hoy)) };
+    });
+    const nomCu = id => (cuentasArr.find(c => c.id === id) || {}).nombre || '';
+    const traspasos = traspasosArr.slice().sort((a, b) => a.fecha.localeCompare(b.fecha)).map(t => ({ id: t.id, fecha: t.fecha, origenId: t.origenId, origen: nomCu(t.origenId), destinoId: t.destinoId, destino: nomCu(t.destinoId), importe: r2(t.importe), comision: r2(t.comision), comisionMovimientoId: t.comisionMovId || null, nota: t.nota || '' }));
+    const ajustesSaldo = regsArr.slice().sort((a, b) => a.fecha.localeCompare(b.fecha)).map(r => ({ id: r.id, cuentaId: r.cuentaId, fecha: r.fecha, importe: r2(r.importe), saldoReal: r2(r.saldoReal), nota: r.nota || '' }));
+    const traspasosFondos = tfsArr.slice().sort((a, b) => a.fecha.localeCompare(b.fecha)).map(t => {
+      const s = ((metricas.get(t.origenId) || {}).traspasosSalida || []).find(x => x.traspasoId === t.id);
+      return { id: t.id, fecha: t.fecha, origenId: t.origenId, destinoId: t.destinoId, todas: !!t.todas, participacionesEntregadas: s ? s.participaciones : t.participaciones, participacionesRecibidas: t.participacionesDestino,
+        vlOrigen: t.vlOrigen || null, vlDestino: t.vlDestino || null, costeTraspasado: s ? s.coste : null, notas: t.notas || '' };
+    });
+    const capPend = r2(deudas.reduce((s, d) => s + d.capitalPendiente, 0));
 
     const json = {
       app: 'Finanzas App', formato: 'finanzas-analisis', version: 1, appVersion: version, generadoEn: ahora, fechaReferencia: hoy, moneda: 'EUR',
-      leeme: 'Copia de solo lectura generada por la app para que el usuario o su asistente puedan analizar sus finanzas. Se sobrescribe en cada actualización: los cambios hechos aquí se pierden. Importes en euros (punto decimal). Gastos en positivo. Las compras financiadas (financiadoPor) no cuentan como gasto del mes: cuentan sus cuotas (movimientos con deudaId). Ganancias de inversiones calculadas por FIFO (método obligatorio en España para valores homogéneos); precios introducidos a mano por el usuario.',
+      leeme: 'Copia de solo lectura generada por la app para que el usuario o su asistente puedan analizar sus finanzas. Se sobrescribe en cada actualización: los cambios hechos aquí se pierden. Importes en euros (punto decimal). Gastos en positivo. Las compras financiadas (financiadoPor) no cuentan como gasto del mes: cuentan sus cuotas (movimientos con deudaId). Los traspasos entre cuentas, los ajustes de saldo y las compras/ventas de inversión NO son gastos ni ingresos (solo mueven saldos); la comisión de un traspaso sí es un gasto (comisionDeTraspasoId). Saldo de cuenta = saldo inicial + ingresos − gastos ± traspasos − compras + ventas ± ajustes, desde la fecha del saldo inicial. En los traspasos entre fondos el destino hereda coste y fechas FIFO (sin ganancia). Ganancias de inversiones calculadas por FIFO (método obligatorio en España para valores homogéneos); precios introducidos a mano por el usuario.',
       categorias: estado.categorias ? { gasto: estado.categorias.gasto || [], ingreso: estado.categorias.ingreso || [] } : null,
-      totales: { movimientos: movimientos.length, vehiculos: vehiculos.length, gastoCombustible: combustible.totales.gasto, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: r2(deudas.reduce((s, d) => s + d.capitalPendiente, 0)), cartera: tot, garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },
+      totales: { movimientos: movimientos.length, vehiculos: vehiculos.length, gastoCombustible: combustible.totales.gasto, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: capPend, cartera: tot,
+        dineroEnCuentas: sal.total, patrimonioNeto: r2(sal.total + tot.valor - capPend), garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },
       resumenMensual, gastosPorCategoria, movimientos, recurrentes, deudas,
-      inversiones: { metodo: 'FIFO', activos: activosOut, totales: tot },
+      cuentas, traspasos, ajustesSaldo,
+      inversiones: { metodo: 'FIFO', activos: activosOut, totales: tot, traspasosEntreFondos: traspasosFondos },
       garantias,
       vehiculos, combustible
     };
 
     const q = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
-    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
+    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'cuenta_id', 'traspaso_id', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
+    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.cuentaId || '', m.comisionDeTraspasoId || '', m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
       m.repostaje ? m.repostaje.matricula : '', m.repostaje ? m.repostaje.litros : '', m.repostaje ? m.repostaje.precioLitro : '', m.repostaje ? m.repostaje.kmTanqueAnterior ?? '' : '', m.repostaje ? m.repostaje.odometro ?? '' : '', m.repostaje ? (m.repostaje.lleno ? 'si' : 'no') : ''].map(q).join(','));
     const csv = '\ufeff' + [cols.join(','), ...filas].join('\r\n') + '\r\n';
     return { json, csv };

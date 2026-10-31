@@ -106,6 +106,14 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.4 (cuentas, traspasos y traspasos entre fondos)
+
+- Sube **todos** los archivos, incluidos los nuevos `js/cuentas-core.js` y `js/cuentas.js` (ya están en la lista `SHELL` de `sw.js`, con `VERSION = 'finanzas-v3.4.0'`). No cambia nada en Google Cloud: mismos permisos, mismo ID de cliente.
+- Los datos que ya tienes en Drive se abren tal cual: la v3.4 solo añade las colecciones `cuentas`, `traspasos`, `regularizaciones` y `traspasosFondos` dentro del mismo `finanzas.json`, y un campo opcional `cuentaId` en movimientos, recurrentes, deudas y operaciones. No cambia ningún importe ni ninguna fecha de lo que ya tenías.
+- Haz una **copia JSON** (Ajustes → Exportar copia) antes de actualizar, por si acaso.
+- Abre la app en **cada dispositivo** con conexión para que se actualice. Un dispositivo con la v3.3 o anterior **no borra** las cuentas ni los traspasos (los conservan y vuelven a subir los dispositivos con la v3.4), pero no los ve; y si en él editas una operación de inversión, esa operación pierde la cuenta asignada.
+- Después, en la pestaña **Cuentas**, crea tus cuentas (la app te ofrece crearlas a partir de los nombres que ya escribías en los movimientos), pon el saldo de cada una y, si quieres, usa **Asignar cuenta** en Inversiones para indicar desde qué cuenta compras.
+
 ### Actualizar a la v3.3 (vehículos y combustible)
 
 - Sube **todos** los archivos, incluidos los nuevos `js/fuel-core.js` y `js/vehiculos.js` (ya están en la lista `SHELL` de `sw.js`, con `VERSION = 'finanzas-v3.3.0'`). No cambia nada en Google Cloud: mismos permisos (`drive.appdata`; `drive.file` solo para la copia para análisis), mismo ID de cliente.

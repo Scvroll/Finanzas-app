@@ -74,6 +74,9 @@ const num = (v, d = 0) => { const n = Number(v); return isFinite(n) ? n : d; };
 const txt = v => String(v ?? '').trim();
 const naturalezaPorDefecto = cat => CATS_FIJAS.includes(cat) ? 'fijo' : 'variable';
 const tipoIngresoPorDefecto = cat => cat === 'Nómina' ? 'nomina' : (cat === 'Freelance' ? 'extra' : 'otro');
+/** v3.4: enlace opcional a una cuenta. Si no hay, el campo no existe (los registros sin cuenta quedan idénticos a los de versiones anteriores). */
+const conCuenta = (o, r) => { if (r && r.cuentaId) o.cuentaId = String(r.cuentaId); return o; };
+const TIPOS_CUENTA = CuentasCore.TIPOS_CUENTA;
 
 /* ---------- Normalización de cada tipo de registro (también migra datos antiguos) ---------- */
 const NORMALIZAR = {
@@ -95,7 +98,8 @@ const NORMALIZAR = {
     }
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
     if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
-    return mov;
+    if (mov.tipo === 'gasto' && m.traspasoId) mov.traspasoId = String(m.traspasoId);     // comisión de un traspaso entre cuentas (v3.4)
+    return conCuenta(mov, m);
   },
   inversiones(i) { return i.nombre ? { ...i } : null; }, // v2: se migra justo después
   recurrentes(r) {
@@ -104,16 +108,16 @@ const NORMALIZAR = {
       descripcion: r.descripcion || '', cuenta: r.cuenta || '', dia: r.dia === FC.DIA_ULTIMO ? FC.DIA_ULTIMO : Math.min(31, Math.max(1, Math.round(num(r.dia, 1)))), desde: r.desde,
       hasta: /^\d{4}-\d{2}$/.test(r.hasta || '') ? r.hasta : '', activo: r.activo !== false };
     if (o.tipo === 'gasto') o.naturaleza = r.naturaleza === 'variable' ? 'variable' : 'fijo'; else o.tipoIngreso = TIPOS_INGRESO[r.tipoIngreso] ? r.tipoIngreso : 'nomina';
-    return o;
+    return conCuenta(o, r);
   },
   deudas(d) {
     if (!(num(d.principal) > 0) || !(num(d.plazo) >= 1) || !FC.isISO(d.fechaPrimeraCuota)) return null;
-    return { id: d.id || uid(), nombre: d.nombre || 'Deuda', medio: MEDIOS_FIN[d.medio] ? d.medio : 'otro', principal: round2(num(d.principal)),
+    return conCuenta({ id: d.id || uid(), nombre: d.nombre || 'Deuda', medio: MEDIOS_FIN[d.medio] ? d.medio : 'otro', principal: round2(num(d.principal)),
       tin: num(d.tin), plazo: Math.round(num(d.plazo)), fechaInicio: FC.isISO(d.fechaInicio) ? d.fechaInicio : d.fechaPrimeraCuota, fechaPrimeraCuota: d.fechaPrimeraCuota,
       diaCobro: FC.normalizarDiaCobro(d.diaCobro, d.fechaPrimeraCuota),   // migración: sin dato = día de la 1.ª cuota (mismas fechas)
       comisionApertura: round2(num(d.comisionApertura)), comisionMensual: round2(num(d.comisionMensual)),
       taeIntroducida: d.taeIntroducida === null || d.taeIntroducida === '' || d.taeIntroducida === undefined || !isFinite(Number(d.taeIntroducida)) ? null : Number(d.taeIntroducida),
-      movimientoId: d.movimientoId || null, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', notas: d.notas || '' };
+      movimientoId: d.movimientoId || null, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', notas: d.notas || '' }, d);
   },
   adjuntos(a) {
     if (!a.ownerId) return null;
@@ -126,8 +130,9 @@ const NORMALIZAR = {
   },
   operaciones(o) {
     if (!o.activoId || !FC.isISO(o.fecha) || !(num(o.participaciones) > 0)) return null;
-    return { id: o.id || uid(), activoId: o.activoId, tipo: o.tipo === 'venta' ? 'venta' : 'compra', fecha: o.fecha, participaciones: num(o.participaciones),
+    const op = { id: o.id || uid(), activoId: o.activoId, tipo: o.tipo === 'venta' ? 'venta' : 'compra', fecha: o.fecha, participaciones: num(o.participaciones),
       precio: num(o.precio), comisiones: round2(num(o.comisiones)), notas: o.notas || '', creado: num(o.creado) };
+    return conCuenta(op, o);
   },
   precios(p) {
     if (!p.activoId || !FC.isISO(p.fecha) || !(num(p.precio) >= 0)) return null;
@@ -154,6 +159,30 @@ const NORMALIZAR = {
       litros, precioLitro: Math.round(precioLitro * 1000) / 1000, importe: round2(importe),
       kmTanqueAnterior: opt(r.kmTanqueAnterior, n => Math.round(n * 10) / 10), odometro: opt(r.odometro, Math.round),
       lleno: r.lleno !== false, gasolinera: txt(r.gasolinera), creado: num(r.creado) };
+  },
+  // v3.4: cuentas, traspasos entre cuentas, ajustes de saldo y traspasos entre fondos
+  cuentas(c) {
+    if (!txt(c.nombre)) return null;
+    const iban = String(c.iban || '').replace(/[^0-9A-Za-z]/g, '').slice(-4).toUpperCase();   // solo los últimos dígitos, nunca el IBAN completo
+    return { id: c.id || uid(), nombre: txt(c.nombre).slice(0, 60), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'corriente', entidad: txt(c.entidad), iban,
+      saldoInicial: round2(num(c.saldoInicial)), fechaSaldo: FC.isISO(c.fechaSaldo) ? c.fechaSaldo : '2000-01-01',
+      color: /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '', icono: txt(c.icono).slice(0, 4), activa: c.activa !== false, orden: num(c.orden), notas: txt(c.notas) };
+  },
+  traspasos(t) {
+    if (!FC.isISO(t.fecha) || !t.origenId || !t.destinoId || t.origenId === t.destinoId || !(num(t.importe) > 0)) return null;
+    return { id: t.id || uid(), fecha: t.fecha, origenId: String(t.origenId), destinoId: String(t.destinoId), importe: round2(num(t.importe)),
+      comision: num(t.comision) > 0 ? round2(num(t.comision)) : 0, nota: txt(t.nota), comisionMovId: t.comisionMovId && num(t.comision) > 0 ? String(t.comisionMovId) : null };
+  },
+  regularizaciones(r) {
+    if (!FC.isISO(r.fecha) || !r.cuentaId || !isFinite(Number(r.importe))) return null;
+    return { id: r.id || uid(), cuentaId: String(r.cuentaId), fecha: r.fecha, importe: round2(num(r.importe)), saldoReal: round2(num(r.saldoReal)), nota: txt(r.nota) };
+  },
+  traspasosFondos(t) {
+    if (!FC.isISO(t.fecha) || !t.origenId || !t.destinoId || t.origenId === t.destinoId || !(num(t.participacionesDestino) > 0)) return null;
+    if (!t.todas && !(num(t.participaciones) > 0)) return null;
+    return { id: t.id || uid(), fecha: t.fecha, origenId: String(t.origenId), destinoId: String(t.destinoId), todas: !!t.todas,
+      participaciones: num(t.participaciones) > 0 ? num(t.participaciones) : 0, participacionesDestino: num(t.participacionesDestino),
+      vlOrigen: num(t.vlOrigen) > 0 ? num(t.vlOrigen) : null, vlDestino: num(t.vlDestino) > 0 ? num(t.vlDestino) : null, notas: txt(t.notas), creado: num(t.creado) };
   }
 };
 
@@ -242,6 +271,9 @@ const Store = {
     // pero NO sus gastos (siguen contando en los totales del mes).
     if (col === 'movimientos') this.state.repostajes.filter(r => !r.deleted && r.movimientoId === id).forEach(r => this._del('repostajes', r.id, t));
     if (col === 'vehiculos') this.state.repostajes.filter(r => !r.deleted && r.vehiculoId === id).forEach(r => this._del('repostajes', r.id, t));
+    // v3.4: borrar un traspaso borra el gasto de su comisión; borrar ese gasto deja el traspaso sin comisión
+    if (col === 'traspasos' && old.comisionMovId) this._del('movimientos', old.comisionMovId, t);
+    if (col === 'movimientos') this.state.traspasos.filter(x => !x.deleted && x.comisionMovId === id).forEach(x => this._put('traspasos', { ...x, comision: 0, comisionMovId: null }, t));
   },
   /** Aplica varios cambios en una sola escritura: [{col, rec}] o [{col, del: id}] */
   async apply(cambios) {
@@ -279,6 +311,47 @@ const Store = {
     const cambios = [{ col: 'activos', del: id }];
     this.list('operaciones').filter(o => o.activoId === id).forEach(o => cambios.push({ col: 'operaciones', del: o.id }));
     this.list('precios').filter(p => p.activoId === id).forEach(p => cambios.push({ col: 'precios', del: p.id }));
+    return this.apply(cambios);
+  },
+  /* --- v3.4: cuentas y traspasos --- */
+  /** Guarda un traspaso entre cuentas. La comisión (si hay) es un gasto real aparte, en la cuenta de origen. */
+  async saveTraspaso(tr) {
+    const id = tr.id || uid(), cambios = [], o = this.get('cuentas', tr.origenId), d = this.get('cuentas', tr.destinoId);
+    const viejo = tr.id ? this.get('traspasos', tr.id) : null;
+    const comision = round2(num(tr.comision));
+    let comisionMovId = null;
+    if (comision > 0) {
+      comisionMovId = (viejo && viejo.comisionMovId) || 'com_' + id;
+      if (!this.getCategorias('gasto').includes('Comisiones')) { this.state.categorias.gasto.push('Comisiones'); this._touchCats(); }
+      const prev = this.get('movimientos', comisionMovId);
+      cambios.push({ col: 'movimientos', rec: { ...(prev || {}), id: comisionMovId, tipo: 'gasto', fecha: tr.fecha, importe: comision, categoria: prev ? prev.categoria : 'Comisiones', naturaleza: prev ? prev.naturaleza : 'variable',
+        descripcion: `Comisión traspaso ${o ? o.nombre : ''} → ${d ? d.nombre : ''}`.trim(), cuenta: o ? o.nombre : '', cuentaId: tr.origenId, traspasoId: id } });
+    } else if (viejo && viejo.comisionMovId && this.get('movimientos', viejo.comisionMovId)) cambios.push({ col: 'movimientos', del: viejo.comisionMovId });
+    cambios.unshift({ col: 'traspasos', rec: { ...tr, id, comision, comisionMovId } });
+    const r = await this.apply(cambios); return r[0];
+  },
+  /** Cambia una cuenta. Si cambia el nombre, actualiza el texto «cuenta» de lo que la usa (y lo enlaza por id). */
+  async saveCuenta(c) {
+    const viejo = c.id ? this.get('cuentas', c.id) : null, cambios = [{ col: 'cuentas', rec: c }];
+    if (viejo && txt(c.nombre) !== viejo.nombre) {
+      const idx = CuentasCore.indice(this.list('cuentas'));
+      for (const col of ['movimientos', 'recurrentes', 'deudas']) for (const r of this.list(col)) {
+        const cu = CuentasCore.resolver(r, idx);
+        if (cu && cu.id === viejo.id) cambios.push({ col, rec: { ...r, cuentaId: viejo.id, cuenta: txt(c.nombre) } });
+      }
+    }
+    const r = await this.apply(cambios); return r[0];
+  },
+  /** Borra una cuenta. Lo que la usaba queda «sin cuenta»; sus traspasos y ajustes se borran. */
+  async deleteCuenta(id) {
+    const c = this.get('cuentas', id); if (!c) return;
+    const idx = CuentasCore.indice(this.list('cuentas')), cambios = [{ col: 'cuentas', del: id }];
+    for (const col of ['movimientos', 'recurrentes', 'deudas', 'operaciones']) for (const r of this.list(col)) {
+      const cu = col === 'operaciones' ? (r.cuentaId === id ? c : null) : CuentasCore.resolver(r, idx);
+      if ((cu && cu.id === id) || r.cuentaId === id) { const { cuentaId, ...resto } = r; if (col !== 'operaciones') resto.cuenta = ''; cambios.push({ col, rec: resto }); }
+    }
+    this.list('traspasos').filter(t => t.origenId === id || t.destinoId === id).forEach(t => cambios.push({ col: 'traspasos', del: t.id }));
+    this.list('regularizaciones').filter(r => r.cuentaId === id).forEach(r => cambios.push({ col: 'regularizaciones', del: r.id }));
     return this.apply(cambios);
   },
   // Categorías
@@ -389,11 +462,7 @@ const Calc = {
   deudas() { return Store.list('deudas').map(d => this.deuda(d)); },
   /** Métricas FIFO por activo y totales de la cartera. */
   cartera() {
-    const ops = Store.list('operaciones'), precios = Store.list('precios');
-    const activos = Store.list('activos').map(a => {
-      const o = ops.filter(x => x.activoId === a.id), p = precios.filter(x => x.activoId === a.id);
-      return { activo: a, ops: o, precios: p, ...FC.metricasActivo(o, p) };
-    });
+    const activos = FC.metricasCartera(Store.list('activos'), Store.list('operaciones'), Store.list('precios'), Store.list('traspasosFondos'));
     const tot = { comprado: 0, aportadoNeto: 0, coste: 0, valor: 0, noRealizada: 0, realizada: 0, porAnio: {} };
     for (const a of activos) {
       tot.comprado += a.comprado; tot.aportadoNeto += a.aportadoNeto; tot.coste += a.costeRestante; tot.valor += a.valor; tot.noRealizada += a.noRealizada; tot.realizada += a.gananciaRealizada;
@@ -402,6 +471,17 @@ const Calc = {
     for (const k of ['comprado', 'aportadoNeto', 'coste', 'valor', 'noRealizada', 'realizada']) tot[k] = round2(tot[k]);
     tot.noRealizadaPct = tot.coste > 0 ? tot.noRealizada / tot.coste : null;
     return { activos, tot };
+  },
+  /** Saldos de las cuentas (v3.4). */
+  datosCuentas() {
+    return { cuentas: Store.list('cuentas'), movimientos: Store.getMovimientos(), traspasos: Store.list('traspasos'), regularizaciones: Store.list('regularizaciones'), operaciones: Store.list('operaciones'), activos: Store.list('activos') };
+  },
+  saldos(hoy = todayISO()) { return CuentasCore.saldos(this.datosCuentas(), hoy); },
+  /** Patrimonio neto = dinero en cuentas + valor de las inversiones − deuda pendiente. */
+  patrimonio() {
+    const s = this.saldos(), car = this.cartera(), deudas = this.deudas();
+    const pendiente = round2(deudas.reduce((t, d) => t + (d.pendiente || 0), 0));
+    return { saldos: s, cuentas: s.total, inversiones: car.tot.valor, deudas: pendiente, neto: round2(s.total + car.tot.valor - pendiente), hayCuentas: s.lista.length > 0 };
   },
   /** Garantías de los gastos, ordenadas por vencimiento. */
   garantias(dias = Store.state.ajustes.avisoGarantiaDias) {
@@ -451,6 +531,14 @@ function renderResumen() {
   const prev = Calc.resumenMes(movs, addMonths(UI.mes, -1));
   $('#kpiBalanceSub').textContent = 'Mes anterior: ' + eur(prev.balance);
   const a = $('#kpiAhorro'); a.textContent = pct(r.tasaAhorro); a.className = 'value ' + (r.tasaAhorro > 0 ? 'pos' : r.tasaAhorro < 0 ? 'neg' : '');
+  // v3.4: dinero invertido (no es gasto), traspasos (no cuentan) y patrimonio
+  const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), UI.mes);
+  $('#kpiInvertido').textContent = eur(inv.neto);
+  $('#kpiInvertidoSub').textContent = inv.n ? `Compras ${eur(inv.compras)}${inv.ventas ? ` − ventas ${eur(inv.ventas)}` : ''} · no es gasto` : 'Sin compras ni ventas este mes';
+  const tp = CuentasCore.traspasosPeriodo(Store.list('traspasos'), UI.mes);
+  $('#kpiTraspasos').hidden = !tp.n;
+  $('#kpiTraspasos').textContent = tp.n ? `⇄ ${tp.n} traspaso${tp.n === 1 ? '' : 's'} entre tus cuentas este mes (${eur(tp.importe)}): no cuentan como gasto ni como ingreso.` : '';
+  renderPatrimonio();
 
   // Desglose: fijos / variables y nómina / extra
   const barra = (partes, total) => total > 0 ? `<div class="stack-bar">${partes.filter(p => p[1] > 0).map(p => `<span class="${p[2]}" style="width:${(p[1] / total * 100).toFixed(2)}%" title="${esc(p[0])}: ${eur(p[1])}"></span>`).join('')}</div>` : '<div class="stack-bar empty-bar"></div>';
@@ -592,8 +680,53 @@ function renderAll() {
   if (active === 'inversiones') renderInversiones();
   if (active === 'garantias') renderGarantias();
   if (active === 'vehiculos') renderVehiculos();
+  if (active === 'cuentas') renderCuentas();
   if (active === 'ajustes') renderAjustes();
   renderBannerGarantias();
+}
+
+/* ---------- Campo «Cuenta» (v3.4) ----------
+   Sin cuentas creadas: el texto libre de siempre. Con cuentas: un desplegable
+   (y, si el registro tenía un texto que no corresponde a ninguna cuenta, se conserva como opción). */
+const ordenCuentas = (a, b) => (a.activa === false) - (b.activa === false) || (a.orden || 0) - (b.orden || 0) || a.nombre.localeCompare(b.nombre, 'es');
+const iconoCuenta = c => c.icono || CuentasCore.ICONO_TIPO[c.tipo] || '💼';
+function cuentaDeRegistro(rec) { return rec ? CuentasCore.resolver(rec, CuentasCore.indice(Store.list('cuentas'))) : null; }
+function cuentaPorDefecto() {
+  const id = Store.state.ajustes.cuentaDefecto || localStorage.getItem('finanzas_ultima_cuenta');
+  const c = id ? Store.get('cuentas', id) : null; return c && c.activa !== false ? c : null;
+}
+function opcionesCuenta(actualId, { vacia = '— Sin cuenta —', excluir = null } = {}) {
+  return (vacia === null ? '' : `<option value="">${esc(vacia)}</option>`) + Store.list('cuentas').sort(ordenCuentas)
+    .filter(c => (c.activa !== false || c.id === actualId) && c.id !== excluir)
+    .map(c => `<option value="${esc(c.id)}" ${c.id === actualId ? 'selected' : ''}>${esc(iconoCuenta(c) + ' ' + c.nombre)}${c.activa === false ? ' (archivada)' : ''}</option>`).join('');
+}
+function prepararCuenta(input, rec, { usarDefecto = !rec } = {}) {
+  let sel = input.parentElement.querySelector('select.cuenta-sel');
+  if (!sel) { sel = document.createElement('select'); sel.className = 'cuenta-sel'; sel.name = input.name + 'Sel'; sel.setAttribute('aria-label', 'Cuenta'); input.after(sel); }
+  input.value = rec?.cuenta || '';
+  if (!Store.list('cuentas').length) { sel.hidden = true; input.hidden = false; sel.innerHTML = ''; return; }
+  const actual = rec && (rec.cuenta || rec.cuentaId) ? cuentaDeRegistro(rec) : (usarDefecto ? cuentaPorDefecto() : null);
+  const legacy = rec && !actual && rec.cuenta ? rec.cuenta : '';
+  sel.innerHTML = opcionesCuenta(actual?.id) + (legacy ? `<option value="__txt">«${esc(legacy)}» (texto; no hay cuenta con ese nombre)</option>` : '');
+  sel.value = actual ? actual.id : legacy ? '__txt' : '';
+  sel.hidden = false; input.hidden = true;
+}
+function fijarCuenta(input, cuentaId, texto) {
+  const sel = input.parentElement.querySelector('select.cuenta-sel');
+  if (sel && !sel.hidden) { const c = cuentaDeRegistro({ cuentaId, cuenta: texto }); if (c && [...sel.options].some(o => o.value === c.id)) sel.value = c.id; }
+  else if (texto) input.value = texto;
+}
+function leerCuenta(input) {
+  const sel = input.parentElement.querySelector('select.cuenta-sel');
+  if (!sel || sel.hidden || sel.value === '__txt') return { cuenta: txt(input.value) };
+  const c = sel.value ? Store.get('cuentas', sel.value) : null;
+  return c ? { cuentaId: c.id, cuenta: c.nombre } : { cuenta: '' };
+}
+/** Pone en `obj` la cuenta elegida (y recuerda la última usada en este dispositivo). */
+function ponerCuenta(obj, input, recordar = false) {
+  delete obj.cuentaId; const c = leerCuenta(input); Object.assign(obj, c);
+  if (recordar && c.cuentaId) localStorage.setItem('finanzas_ultima_cuenta', c.cuentaId);
+  return obj;
 }
 
 /* ---------- Diálogo movimiento ---------- */
@@ -652,7 +785,7 @@ function mostrarDesgloseCuota(rellenar = false) {
   if (rellenar) {
     f.importe.value = fmtInput(x.fila.pago);
     if (!f.id.value) f.fecha.value = x.fila.fecha;
-    fillCategoriaSelect('gasto', x.d.categoria); f.cuenta.value = f.cuenta.value || x.d.cuenta;
+    fillCategoriaSelect('gasto', x.d.categoria); if (x.d.cuenta || x.d.cuentaId) fijarCuenta(f.cuenta, x.d.cuentaId, x.d.cuenta);
     f.descripcion.value = `Cuota ${x.fila.n}/${x.c.filas.length} · ${x.d.nombre}`;
     f.querySelector('input[name="naturaleza"][value="fijo"]').checked = true;
   }
@@ -668,10 +801,11 @@ function openMovDialog(mov, preset = {}) {
   // por defecto: hoy si estamos en el mes actual, si no el día 1 del mes seleccionado
   f.fecha.value = mov?.fecha || (monthKey(todayISO()) === UI.mes ? todayISO() : UI.mes + '-01');
   fillCategoriaSelect(tipo, mov?.categoria);
-  f.cuenta.value = mov?.cuenta || ''; f.descripcion.value = mov?.descripcion || '';
+  f.descripcion.value = mov?.descripcion || '';
   f.querySelector(`input[name="naturaleza"][value="${mov?.naturaleza || naturalezaPorDefecto(f.categoria.value)}"]`).checked = true;
   f.tipoIngreso.value = mov?.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
   $('#cuentasList').innerHTML = [...new Set(Store.getMovimientos().map(m => m.cuenta).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
+  prepararCuenta(f.cuenta, mov);
   // pago de deuda
   f.esPago.checked = !!mov?.deudaId; llenarSelectDeudas(mov?.deudaId, mov?.cuotaN);
   // financiación
@@ -718,7 +852,8 @@ $('#movForm').addEventListener('submit', async e => {
   if (!isFinite(importe) || importe <= 0) return err('Introduce un importe mayor que 0 (p. ej. 12,50).');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f.fecha.value)) return err('Introduce una fecha válida.');
   const editando = MovDlg.mov;
-  const mov = { ...(editando || {}), id: f.id.value || null, tipo, fecha: f.fecha.value, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), cuenta: f.cuenta.value.trim() };
+  const mov = { ...(editando || {}), id: f.id.value || null, tipo, fecha: f.fecha.value, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim() };
+  ponerCuenta(mov, f.cuenta, true);
   delete mov.deudaId; delete mov.cuotaN; delete mov.desglose; delete mov.financiadoPor; delete mov.garantia; delete mov.naturaleza; delete mov.tipoIngreso;
   if (gasto) mov.naturaleza = f.querySelector('input[name="naturaleza"]:checked').value; else mov.tipoIngreso = f.tipoIngreso.value;
   const cambios = [];
@@ -737,7 +872,7 @@ $('#movForm').addEventListener('submit', async e => {
   }
   // Repetir cada mes -> plantilla recurrente (y este movimiento es el del primer mes)
   if (!editando && f.esRec.checked) {
-    const rec = { id: uid(), tipo, importe, categoria: mov.categoria, descripcion: mov.descripcion, cuenta: mov.cuenta, dia: f.recUltimo.checked ? FC.DIA_ULTIMO : Number(mov.fecha.slice(8)), desde: monthKey(mov.fecha), hasta: '', activo: true, naturaleza: mov.naturaleza, tipoIngreso: mov.tipoIngreso };
+    const rec = { id: uid(), tipo, importe, categoria: mov.categoria, descripcion: mov.descripcion, cuenta: mov.cuenta, ...(mov.cuentaId ? { cuentaId: mov.cuentaId } : {}), dia: f.recUltimo.checked ? FC.DIA_ULTIMO : Number(mov.fecha.slice(8)), desde: monthKey(mov.fecha), hasta: '', activo: true, naturaleza: mov.naturaleza, tipoIngreso: mov.tipoIngreso };
     mov.id = FC.idRecurrente(rec.id, rec.desde); mov.recurrenteId = rec.id;
     cambios.push({ col: 'recurrentes', rec });
   }
@@ -761,6 +896,7 @@ $('#movForm').addEventListener('submit', async e => {
     const d = leerFinFields('#movFin');
     if (d.error) return err(d.error);
     const deuda = { ...(MovDlg.deuda || {}), ...d, id: MovDlg.deuda?.id || uid(), nombre: mov.descripcion || mov.categoria, fechaInicio: mov.fecha, movimientoId: mov.id, categoria: mov.categoria, cuenta: mov.cuenta };
+    delete deuda.cuentaId; if (mov.cuentaId) deuda.cuentaId = mov.cuentaId;   // las cuotas se pagarán, por defecto, desde la misma cuenta
     mov.financiadoPor = deuda.id;
     cambios.push({ col: 'deudas', rec: deuda });
   } else if (MovDlg.deuda) {
@@ -910,7 +1046,7 @@ function generarDatosEjemplo(ym = UI.mes) {
     add('gasto', d(6), 18, 'Suministros', 'Agua');
     add('gasto', d(7), 35, 'Telefonía e internet', 'Fibra + móvil');
     for (let s = 0; s < 4; s++) add('gasto', d(3 + s * 7), 55 + rnd() * 45, 'Supermercado', ['Mercadona', 'HiperDino', 'Lidl', 'Alcampo'][s], s % 2 ? 'Tarjeta' : 'Banco');
-    for (let s = 0; s < 3; s++) add('gasto', d(9 + s * 6), 15 + rnd() * 40, 'Restaurantes', ['Guachinche', 'Cena con amigos', 'Terraza'][s], 'Tarjeta');
+    for (let s = 0; s < 3; s++) add('gasto', d(9 + s * 6), 15 + rnd() * 40, 'Restaurantes', ['Guachinche', 'Cena con amigos', 'Terraza'][s], s === 0 ? 'Efectivo' : 'Tarjeta');
     rnd();   // (antes: gasolina; ahora van como repostajes, más abajo)
     if (rnd() > .4) add('gasto', d(18), 20 + rnd() * 80, 'Ocio', 'Concierto / cine', 'Tarjeta');
     if (rnd() > .6) add('gasto', d(22), 30 + rnd() * 90, 'Ropa', 'Ropa', 'Tarjeta');
@@ -971,7 +1107,32 @@ function generarDatosEjemplo(ym = UI.mes) {
   };
   repostar(vehiculos[0], 620, 5.4, 1.38, ['Repsol', 'Cepsa', 'Shell']);
   repostar(vehiculos[1], 480, 6.3, 1.49, ['BP', 'Disa']);
-  return { movimientos: movs, recurrentes, deudas, activos, operaciones, precios, vehiculos, repostajes };
+  // Cuentas (v3.4): los textos «Banco», «Tarjeta» y «Efectivo» se enlazan solos por nombre
+  const existentes = CuentasCore.indice(Store.list('cuentas')).byName, cuentas = [];
+  const cuenta = (nombre, tipo, saldoInicial, extra = {}) => {
+    const ya = existentes.get(CuentasCore.normNombre(nombre)); if (ya) return ya;
+    const c = { id: uid(), nombre, tipo, saldoInicial, fechaSaldo: `${desde}-01`, activa: true, orden: cuentas.length, entidad: '', iban: '', ...extra }; cuentas.push(c); return c;
+  };
+  const cBanco = cuenta('Banco', 'corriente', 3200, { entidad: 'Banco ejemplo', iban: '4821', color: '#0f766e' });
+  const cTarjeta = cuenta('Tarjeta', 'otra', 150, { icono: '💳', color: '#f59e0b' });
+  const cInv = cuenta('Cuenta inversión', 'inversion', 1500, { entidad: 'Bróker ejemplo', iban: '0937', color: '#8b5cf6' });
+  const cEfe = cuenta('Efectivo', 'efectivo', 80, { color: '#10b981' });
+  const traspasos = [];
+  for (let i = 11; i >= 0; i--) {
+    const k = addMonths(ym, -i), f = n => `${k}-${pad(n)}`;
+    const t = (fecha, o, d, importe, nota) => { if (fecha <= hoy) traspasos.push({ id: uid(), fecha, origenId: o.id, destinoId: d.id, importe, comision: 0, nota }); };
+    t(f(2), cBanco, cInv, 300, 'Aportación mensual a inversión');
+    t(f(3), cBanco, cTarjeta, 650, 'Recarga tarjeta');
+    t(f(10), cBanco, cEfe, 60, 'Cajero');
+  }
+  // Las compras y ventas de inversión salen y llegan a la cuenta de inversión (solo las desde su fecha de saldo)
+  operaciones.forEach(o => { if (o.fecha >= cInv.fechaSaldo) o.cuentaId = cInv.id; });
+  // Traspaso entre fondos (sin tributar): parte del Vanguard pasa a un fondo Amundi
+  const amundi = activo('Amundi Index MSCI World', 'fondo', 'LU0996182563', '', 'Recibido por traspaso');
+  const fTf = FC.addMonthsISO(hoy, -2), vlO = 46.8, vlD = 302.15, partO = 40;
+  const traspasosFondos = [{ id: uid(), fecha: fTf, origenId: fondo.id, destinoId: amundi.id, todas: false, participaciones: partO, participacionesDestino: round2(partO * vlO / vlD * 10000) / 10000, vlOrigen: vlO, vlDestino: vlD, notas: 'Traspaso parcial', creado: 1 }];
+  precio(amundi, FC.addDaysISO(hoy, -2), 309.4);
+  return { movimientos: movs, recurrentes, deudas, activos, operaciones, precios, vehiculos, repostajes, cuentas, traspasos, traspasosFondos };
 }
 $('#sampleBtn').addEventListener('click', async () => {
   if ((Store.getMovimientos().length || Store.list('activos').length) && !confirm('Se añadirán datos de ejemplo a los que ya tienes. ¿Continuar?')) return;
@@ -979,7 +1140,7 @@ $('#sampleBtn').addEventListener('click', async () => {
   await Store.addMany(generarDatosEjemplo()); toast('Datos de ejemplo cargados'); showView('resumen');
 });
 $('#resetBtn').addEventListener('click', async () => {
-  if (!confirm('¿Borrar TODOS los movimientos, deudas, inversiones, adjuntos y categorías personalizadas? Si usas Google Drive, se borrarán también en tus otros dispositivos. Esta acción no se puede deshacer (exporta antes una copia).')) return;
+  if (!confirm('¿Borrar TODOS los movimientos, cuentas y traspasos, deudas, inversiones, vehículos, adjuntos y categorías personalizadas? Si usas Google Drive, se borrarán también en tus otros dispositivos. Esta acción no se puede deshacer (exporta antes una copia).')) return;
   await Store.reset(); toast('Datos borrados');
 });
 

@@ -7,7 +7,8 @@
    - Borrar = "lápida" (tombstone): {id, deleted:true, updatedAt}.
      Así otro dispositivo no "resucita" lo borrado.
    - Fusión por id: gana la versión con updatedAt más reciente
-     (last-write-wins por registro). Empate: gana la lápida.
+     (last-write-wins por registro). Empate: gana la lápida; si no, la copia
+     con más campos (la que no ha pasado por una versión antigua); si no, orden fijo.
    - Las listas de categorías se tratan como un único registro LWW.
    - Los ajustes (tema) son del dispositivo y no se sincronizan.
    ========================================================= */
@@ -16,7 +17,9 @@
   const DOC_VERSION = 3;
   // Colecciones sincronizadas registro a registro. «inversiones» es la de la v2: se conserva
   // solo para que sus lápidas (tras migrar a activos/operaciones) lleguen a todos los dispositivos.
-  const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios', 'vehiculos', 'repostajes'];
+  // v3.4 añade cuentas, traspasos (entre cuentas), regularizaciones («Ajustar saldo») y traspasosFondos.
+  const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios', 'vehiculos', 'repostajes',
+    'cuentas', 'traspasos', 'regularizaciones', 'traspasosFondos'];
   // Lápidas que no se purgan nunca: los movimientos generados por plantillas recurrentes tienen id
   // determinista y se volverían a generar si su lápida desapareciera.
   const NO_PURGAR = /^rec_/;
@@ -34,6 +37,14 @@
     const ta = a.updatedAt || 0, tb = b.updatedAt || 0;
     if (ta !== tb) return ta > tb ? a : b;
     if (!!a.deleted !== !!b.deleted) return a.deleted ? a : b;
+    // Misma versión, pero una copia tiene campos de más: es la original y la otra viene de una
+    // versión antigua de la app que quitó los campos que no conoce (p. ej. cuentaId) sin cambiar
+    // updatedAt. Gana la que conserva todos los campos.
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) {
+      const [mayor, menor, km] = ka.length > kb.length ? [a, b, kb] : [b, a, ka];
+      if (km.every(k => k in mayor)) return mayor;
+    }
     return stableStringify(a) >= stableStringify(b) ? a : b; // desempate determinista
   }
 

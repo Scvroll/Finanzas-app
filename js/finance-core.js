@@ -144,62 +144,176 @@
    * FIFO. Coste de adquisición = participaciones × precio + comisiones de compra.
    * Valor de transmisión = participaciones × precio − comisiones de venta.
    * Una venta parcial de un lote se lleva la parte proporcional de su coste (comisiones incluidas).
+   *
+   * Traspasos entre fondos (régimen de diferimiento español): no hay ganancia ni pérdida.
+   * Las participaciones salen del fondo de origen por FIFO y entran en el de destino
+   * conservando el coste y la FECHA de compra originales de cada lote, repartidos en
+   * proporción a las participaciones recibidas. Por eso el motor recorre todas las
+   * operaciones de todos los activos en orden cronológico. Un mismo día: compras,
+   * luego traspasos y luego ventas.
    */
-  function fifo(operaciones) {
-    const lotes = [], ventas = [], errores = [];
-    let compras = 0, ventasNetas = 0;
-    for (const op of ordenarOperaciones(operaciones)) {
+  const ORDEN_EVENTO = { compra: 0, traspaso: 1, venta: 2 };
+  function nuevoEstado() { return { lotes: [], ventas: [], errores: [], compras: 0, ventasNetas: 0, costeEntrada: 0, costeSalida: 0, entradas: [], salidas: [] }; }
+  /** Saca `cantidad` participaciones por FIFO. Devuelve los trozos y lo que faltó. */
+  function sacarFIFO(st, cantidad) {
+    let resto = cantidad; const trozos = [];
+    while (resto > EPS && st.lotes.length) {
+      const l = st.lotes[0], toma = Math.min(resto, l.participaciones), coste = l.costeUnitario * toma;
+      trozos.push({ lote: l, toma: round8(toma), coste });
+      l.participaciones = round8(l.participaciones - toma); l.coste -= coste; resto = round8(resto - toma);
+      if (l.participaciones <= EPS) st.lotes.shift();
+    }
+    return { trozos, resto };
+  }
+  function motorFIFO(operaciones, traspasos, clave) {
+    const estados = new Map(), erroresTraspaso = [];
+    const st = k => { if (!estados.has(k)) estados.set(k, nuevoEstado()); return estados.get(k); };
+    const eventos = [
+      ...operaciones.map(o => ({ e: o, tipo: o.tipo === 'venta' ? 'venta' : 'compra' })),
+      ...traspasos.map(t => ({ e: t, tipo: 'traspaso' }))
+    ].sort((a, b) => (a.e.fecha < b.e.fecha ? -1 : a.e.fecha > b.e.fecha ? 1 : 0) || (ORDEN_EVENTO[a.tipo] - ORDEN_EVENTO[b.tipo]) ||
+      ((a.e.creado || 0) - (b.e.creado || 0)) || String(a.e.id).localeCompare(String(b.e.id)));
+    for (const { e, tipo } of eventos) {
+      if (tipo === 'traspaso') { aplicarTraspaso(e, st, erroresTraspaso); continue; }
+      const s = st(clave(e)), op = e;
       const part = Number(op.participaciones), precio = Number(op.precio), com = Number(op.comisiones) || 0;
-      if (!(part > 0)) { errores.push({ opId: op.id, msg: 'Participaciones no válidas' }); continue; }
-      if (op.tipo === 'compra') {
-        const coste = part * precio + com; compras += coste;
-        lotes.push({ opId: op.id, fecha: op.fecha, participaciones: part, iniciales: part, coste, costeUnitario: coste / part });
+      if (!(part > 0)) { s.errores.push({ opId: op.id, msg: 'Participaciones no válidas' }); continue; }
+      if (tipo === 'compra') {
+        const coste = part * precio + com; s.compras += coste;
+        s.lotes.push({ opId: op.id, fecha: op.fecha, participaciones: part, iniciales: part, coste, costeUnitario: coste / part });
       } else {
-        let resto = part; const consumos = [];
-        while (resto > EPS && lotes.length) {
-          const l = lotes[0], toma = Math.min(resto, l.participaciones), coste = l.costeUnitario * toma;
-          consumos.push({ compraId: l.opId, fecha: l.fecha, participaciones: round8(toma), costeUnitario: l.costeUnitario, coste: round2(coste), _c: coste });
-          l.participaciones = round8(l.participaciones - toma); l.coste -= coste; resto = round8(resto - toma);
-          if (l.participaciones <= EPS) lotes.shift();
-        }
-        if (resto > EPS) errores.push({ opId: op.id, msg: `Se venden ${round8(resto)} participaciones más de las que había el ${op.fecha}` });
-        const importeNeto = part * precio - com; ventasNetas += importeNeto;
-        const costeTotal = consumos.reduce((s, c) => s + c._c, 0);
+        const { trozos, resto } = sacarFIFO(s, part);
+        const consumos = trozos.map(t => {
+          const c = { compraId: t.lote.opId, fecha: t.lote.fecha, participaciones: t.toma, costeUnitario: t.lote.costeUnitario, coste: round2(t.coste), _c: t.coste };
+          if (t.lote.origen) c.origen = t.lote.origen;
+          return c;
+        });
+        if (resto > EPS) s.errores.push({ opId: op.id, msg: `Se venden ${round8(resto)} participaciones más de las que había el ${op.fecha}` });
+        const importeNeto = part * precio - com; s.ventasNetas += importeNeto;
+        const costeTotal = consumos.reduce((x, c) => x + c._c, 0);
         consumos.forEach(c => delete c._c);
-        ventas.push({ opId: op.id, fecha: op.fecha, participaciones: part, precio, comisiones: com, importeNeto: round2(importeNeto), coste: round2(costeTotal), ganancia: round2(importeNeto - costeTotal), consumos, incompleta: resto > EPS });
+        s.ventas.push({ opId: op.id, fecha: op.fecha, participaciones: part, precio, comisiones: com, importeNeto: round2(importeNeto), coste: round2(costeTotal), ganancia: round2(importeNeto - costeTotal), consumos, incompleta: resto > EPS });
       }
     }
-    const participaciones = round8(lotes.reduce((s, l) => s + l.participaciones, 0));
-    const costeRestante = lotes.reduce((s, l) => s + l.coste, 0);
+    return { estados, erroresTraspaso };
+  }
+  function aplicarTraspaso(t, st, erroresTraspaso) {
+    const err = msg => { const e = { traspasoId: t.id, activoId: t.origenId, msg }; erroresTraspaso.push(e); st(t.origenId).errores.push(e); };
+    if (!t.origenId || !t.destinoId || t.origenId === t.destinoId) return err('El traspaso necesita un fondo de origen y otro de destino distintos');
+    const O = st(t.origenId), D = st(t.destinoId);
+    const disponibles = round8(O.lotes.reduce((x, l) => x + l.participaciones, 0));
+    const X = t.todas ? disponibles : Number(t.participaciones);
+    const R = Number(t.participacionesDestino);
+    if (!(X > EPS)) return err(`No hay participaciones que traspasar el ${t.fecha}`);
+    if (!(R > 0)) return err('Indica las participaciones recibidas en el fondo de destino');
+    const { trozos, resto } = sacarFIFO(O, X);
+    if (resto > EPS) err(`Se traspasan ${round8(resto)} participaciones más de las que había el ${t.fecha}`);
+    const tomado = round8(X - resto), objetivo = round8(R * tomado / X);
+    let acumulado = 0, coste = 0;
+    const origen = { traspasoId: t.id, activoId: t.origenId, fecha: t.fecha };
+    const nuevos = trozos.map((tr, i) => {
+      const p = i === trozos.length - 1 ? round8(objetivo - acumulado) : round8(tr.toma * R / X);
+      acumulado = round8(acumulado + p); coste += tr.coste;
+      return { opId: tr.lote.opId, fecha: tr.lote.fecha, participaciones: p, iniciales: p, coste: tr.coste, costeUnitario: p > 0 ? tr.coste / p : 0, origen };
+    });
+    // Los lotes heredados se colocan por su fecha de compra original (FIFO del fondo de destino)
+    for (const l of nuevos) {
+      if (!(l.participaciones > EPS)) continue;
+      let i = D.lotes.findIndex(x => x.fecha > l.fecha); if (i < 0) i = D.lotes.length;
+      D.lotes.splice(i, 0, l);
+    }
+    const lotesSalida = trozos.map(tr => ({ compraId: tr.lote.opId, fecha: tr.lote.fecha, participaciones: tr.toma, coste: round2(tr.coste), ...(tr.lote.origen ? { origen: tr.lote.origen } : {}) }));
+    O.costeSalida += coste; D.costeEntrada += coste;
+    O.salidas.push({ traspasoId: t.id, fecha: t.fecha, destinoId: t.destinoId, participaciones: tomado, recibidas: objetivo, coste: round2(coste), lotes: lotesSalida, incompleta: resto > EPS });
+    D.entradas.push({ traspasoId: t.id, fecha: t.fecha, origenId: t.origenId, participaciones: objetivo, entregadas: tomado, coste: round2(coste), lotes: lotesSalida.length });
+  }
+  function resultadoFIFO(s) {
+    const { lotes, ventas, errores } = s;
+    const participaciones = round8(lotes.reduce((x, l) => x + l.participaciones, 0));
+    const costeRestante = lotes.reduce((x, l) => x + l.coste, 0);
     const porAnio = {};
     ventas.forEach(v => { const y = v.fecha.slice(0, 4); porAnio[y] = round2((porAnio[y] || 0) + v.ganancia); });
-    return {
+    const r = {
       participaciones, costeRestante: round2(costeRestante),
       costeMedio: participaciones > EPS ? costeRestante / participaciones : 0,
-      lotes: lotes.map(l => ({ opId: l.opId, fecha: l.fecha, participaciones: l.participaciones, iniciales: l.iniciales, coste: round2(l.coste), costeUnitario: l.costeUnitario })),
+      lotes: lotes.map(l => { const o = { opId: l.opId, fecha: l.fecha, participaciones: l.participaciones, iniciales: l.iniciales, coste: round2(l.coste), costeUnitario: l.costeUnitario }; if (l.origen) o.origen = l.origen; return o; }),
       ventas, errores,
-      comprado: round2(compras), vendidoNeto: round2(ventasNetas), aportadoNeto: round2(compras - ventasNetas),
-      gananciaRealizada: round2(ventas.reduce((s, v) => s + v.ganancia, 0)), realizadaPorAnio: porAnio
+      comprado: round2(s.compras), vendidoNeto: round2(s.ventasNetas),
+      // Aportado neto del activo: lo que has puesto de tu bolsillo, más/menos el coste que entra/sale por traspasos
+      aportadoNeto: round2(s.compras + s.costeEntrada - s.ventasNetas - s.costeSalida),
+      gananciaRealizada: round2(ventas.reduce((x, v) => x + v.ganancia, 0)), realizadaPorAnio: porAnio
     };
+    if (s.entradas.length || s.salidas.length) Object.assign(r, { traspasosEntrada: s.entradas, traspasosSalida: s.salidas, costeEntrada: round2(s.costeEntrada), costeSalida: round2(s.costeSalida) });
+    return r;
+  }
+  /** FIFO de un solo activo (sin traspasos). */
+  function fifo(operaciones) {
+    const { estados } = motorFIFO(operaciones, [], () => '_');
+    return resultadoFIFO(estados.get('_') || nuevoEstado());
+  }
+  /** FIFO de toda la cartera con traspasos entre fondos. Devuelve { porActivo: {id: resultado}, erroresTraspaso }. */
+  function carteraFIFO(operaciones, traspasosFondos = []) {
+    const { estados, erroresTraspaso } = motorFIFO(operaciones, traspasosFondos.filter(t => !t.deleted), o => o.activoId);
+    const porActivo = {};
+    for (const [k, s] of estados) porActivo[k] = resultadoFIFO(s);
+    return { porActivo, erroresTraspaso, vacio: resultadoFIFO(nuevoEstado()) };
+  }
+  /** Claves de los errores (para saber si un cambio crea errores nuevos). */
+  function clavesErrores(cf) {
+    const out = new Set();
+    for (const [k, r] of Object.entries(cf.porActivo)) r.errores.forEach(e => out.add(k + '|' + (e.opId || e.traspasoId) + '|' + e.msg));
+    return out;
+  }
+  /** Errores que aparecen en `despues` y no estaban en `antes` (resultados de carteraFIFO). */
+  function erroresNuevos(antes, despues) {
+    const a = clavesErrores(antes), out = [];
+    for (const [k, r] of Object.entries(despues.porActivo)) r.errores.forEach(e => { if (!a.has(k + '|' + (e.opId || e.traspasoId) + '|' + e.msg)) out.push(e); });
+    return out;
+  }
+  /** Cuadre de un traspaso entre fondos: importe que sale (part. × VL origen) frente al que entra. */
+  function cuadreTraspasoFondos({ participaciones, vlOrigen, participacionesDestino, vlDestino }) {
+    const sale = participaciones > 0 && vlOrigen > 0 ? participaciones * vlOrigen : null;
+    const entra = participacionesDestino > 0 && vlDestino > 0 ? participacionesDestino * vlDestino : null;
+    const diferencia = sale !== null && entra !== null ? round2(entra - sale) : null;
+    return { sale: sale === null ? null : round2(sale), entra: entra === null ? null : round2(entra), diferencia, cuadra: diferencia === null || Math.abs(diferencia) <= Math.max(1, 0.005 * sale) };
   }
   /** Último precio por fecha (y, a igualdad, el editado más tarde). */
   function ultimoPrecio(precios) {
     return [...precios].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0) || (b.updatedAt || 0) - (a.updatedAt || 0))[0] || null;
   }
-  /** Métricas de un activo: FIFO + valor de mercado con el último precio manual. */
-  function metricasActivo(operaciones, precios) {
-    const f = fifo(operaciones);
+  /** Métricas de un activo a partir de su resultado FIFO + valor de mercado con el último precio manual. */
+  function metricasDe(f, operaciones, precios, extrasPrecio = []) {
     const up = ultimoPrecio(precios);
     let precio = up ? up.precio : null, fechaPrecio = up ? up.fecha : null, precioDeOperacion = false;
-    if (precio === null && operaciones.length) { const last = ordenarOperaciones(operaciones).pop(); precio = Number(last.precio); fechaPrecio = last.fecha; precioDeOperacion = true; }
+    if (precio === null) {
+      const cand = [...ordenarOperaciones(operaciones).map(o => ({ fecha: o.fecha, precio: Number(o.precio) })), ...extrasPrecio].filter(c => c.precio >= 0);
+      const last = cand.sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0)).pop();
+      if (last) { precio = last.precio; fechaPrecio = last.fecha; precioDeOperacion = true; }
+    }
     const valor = precio === null ? 0 : round2(f.participaciones * precio);
     const noRealizada = round2(valor - f.costeRestante);
     return { ...f, precio, fechaPrecio, precioDeOperacion, valor, noRealizada, noRealizadaPct: f.costeRestante > 0 ? noRealizada / f.costeRestante : null };
+  }
+  function metricasActivo(operaciones, precios) { return metricasDe(fifo(operaciones), operaciones, precios); }
+  /** Métricas de todos los activos teniendo en cuenta los traspasos entre fondos. */
+  function metricasCartera(activos, operaciones, precios, traspasosFondos = []) {
+    const cf = carteraFIFO(operaciones, traspasosFondos);
+    return activos.map(a => {
+      const o = operaciones.filter(x => x.activoId === a.id), p = precios.filter(x => x.activoId === a.id);
+      const vl = traspasosFondos.filter(t => !t.deleted && t.destinoId === a.id && t.vlDestino > 0).map(t => ({ fecha: t.fecha, precio: Number(t.vlDestino) }))
+        .concat(traspasosFondos.filter(t => !t.deleted && t.origenId === a.id && t.vlOrigen > 0).map(t => ({ fecha: t.fecha, precio: Number(t.vlOrigen) })));
+      return { activo: a, ops: o, precios: p, ...metricasDe(cf.porActivo[a.id] || cf.vacio, o, p, vl) };
+    });
   }
   /** Comprueba si una venta nueva/editada cabe (participaciones disponibles a esa fecha). */
   function disponibleEn(operaciones, fecha, excluirId = null) {
     const ops = operaciones.filter(o => o.id !== excluirId && o.fecha <= fecha);
     return fifo(ops).participaciones;
+  }
+  /** Participaciones de un activo a una fecha (incluida), contando traspasos entre fondos. */
+  function disponibleActivo(activoId, operaciones, traspasosFondos, fecha, excluirId = null) {
+    const cf = carteraFIFO(operaciones.filter(o => o.id !== excluirId && o.fecha <= fecha), traspasosFondos.filter(t => t.id !== excluirId && t.fecha <= fecha));
+    return (cf.porActivo[activoId] || cf.vacio).participaciones;
   }
 
   /* ---------------- Movimientos recurrentes ---------------- */
@@ -232,6 +346,7 @@
       for (const p of periodosRecurrente(r, hoy)) {
         if (existentes.has(p.id)) continue;
         const m = { id: p.id, tipo: r.tipo, fecha: p.fecha, importe: round2(r.importe), categoria: r.categoria, descripcion: r.descripcion || '', cuenta: r.cuenta || '', recurrenteId: r.id, updatedAt: p.updatedAt };
+        if (r.cuentaId) m.cuentaId = r.cuentaId;
         if (r.tipo === 'gasto') m.naturaleza = r.naturaleza || 'fijo'; else m.tipoIngreso = r.tipoIngreso || 'otro';
         nuevos.push(m); existentes.add(p.id);
       }
@@ -428,7 +543,7 @@
     round2, isISO, daysInMonth, addMonthsISO, addYearsISO, addDaysISO, diffDays, ymAdd, fechaEnMes,
     DIA_ULTIMO, normalizarDiaCobro, fechaCobroEnMes, fechaCuota, textoDiaCobro,
     cuotaFrancesa, cuadroAmortizacion, tir, calcularTAE, resumenDeuda,
-    fifo, ordenarOperaciones, ultimoPrecio, metricasActivo, disponibleEn,
+    fifo, carteraFIFO, erroresNuevos, cuadreTraspasoFondos, ordenarOperaciones, ultimoPrecio, metricasActivo, metricasCartera, disponibleEn, disponibleActivo,
     idRecurrente, periodosRecurrente, generarRecurrentes,
     GARANTIA_ANIOS_DEFECTO, vencimientoGarantia, estadoGarantia, urlGoogleCalendar,
     parseNumeroES, importesEn, fechasEn, detectarTipoDocumento, analizarTexto,
