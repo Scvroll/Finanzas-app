@@ -79,6 +79,16 @@ const conCuenta = (o, r) => { if (r && r.cuentaId) o.cuentaId = String(r.cuentaI
 const TIPOS_CUENTA = CuentasCore.TIPOS_CUENTA;
 
 /* ---------- Normalización de cada tipo de registro (también migra datos antiguos) ---------- */
+/** v3.5: campos del modo «Cuota manual» de una deuda (solo si es manual; sin ellos la deuda es «calculada», como siempre). */
+function modoManual(d) {
+  if (d.modo !== 'manual' || !(num(d.cuotaManual) > 0)) return {};
+  const plazo = Math.round(num(d.plazo)), cuota = round2(num(d.cuotaManual)), ed = {};
+  for (const [k, v] of Object.entries(d.cuotasEditadas && typeof d.cuotasEditadas === 'object' ? d.cuotasEditadas : {})) {
+    const n = Number(k), x = round2(num(v));
+    if (Number.isInteger(n) && n >= 1 && n <= plazo && x > 0 && x !== cuota) ed[n] = x;
+  }
+  return { modo: 'manual', cuotaManual: cuota, cuotasEditadas: ed, capitalConocido: d.capitalConocido === true, tinConocido: d.capitalConocido === true && d.tinConocido === true };
+}
 const NORMALIZAR = {
   movimientos(m) {
     if (!m.fecha || !isFinite(Number(m.importe))) return null;
@@ -117,7 +127,7 @@ const NORMALIZAR = {
       diaCobro: FC.normalizarDiaCobro(d.diaCobro, d.fechaPrimeraCuota),   // migración: sin dato = día de la 1.ª cuota (mismas fechas)
       comisionApertura: round2(num(d.comisionApertura)), comisionMensual: round2(num(d.comisionMensual)),
       taeIntroducida: d.taeIntroducida === null || d.taeIntroducida === '' || d.taeIntroducida === undefined || !isFinite(Number(d.taeIntroducida)) ? null : Number(d.taeIntroducida),
-      movimientoId: d.movimientoId || null, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', notas: d.notas || '' }, d);
+      movimientoId: d.movimientoId || null, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', notas: d.notas || '', ...modoManual(d) }, d);
   },
   adjuntos(a) {
     if (!a.ownerId) return null;
@@ -928,16 +938,34 @@ async function confirmarBorrarMov(id) {
 
 /* ---------- Campos de financiación (compartidos por el diálogo de movimiento y el de deuda) ---------- */
 function finFieldsHTML(p) {
-  return `<div class="form-grid fin-fields" data-fin="${p}">
+  const id = p.replace('#', '');
+  // Las etiquetas con data-calc / data-manual cambian según el modo; .fin-solo-calc / .fin-solo-manual se muestran solo en su modo.
+  const L = (calc, manual) => `<label data-calc="${calc}" data-manual="${manual}">${calc}</label>`;
+  return `<div class="form-grid fin-fields" data-fin="${p}" data-modo="calculado">
+    <div class="full fin-modo"><label>¿Cómo quieres introducir la deuda?</label>
+      <span class="seg seg-sm" role="radiogroup" aria-label="Modo de la deuda">
+        <input type="radio" name="modoFin" id="${id}-modoCalc" value="calculado" checked><label for="${id}-modoCalc">Calcular cuotas</label>
+        <input type="radio" name="modoFin" id="${id}-modoManual" value="manual"><label for="${id}-modoManual">Cuota manual</label>
+      </span>
+      <p class="muted small fin-modo-ayuda fin-solo-calc" style="margin:6px 0 0">Indicas importe, TIN y plazo, y la app calcula la cuota (sistema francés).</p>
+      <p class="muted small fin-modo-ayuda fin-solo-manual" style="margin:6px 0 0">Indicas la cuota que te cobran, el día y cuántas cuotas son. Capital, TIN y TAE son opcionales.</p>
+    </div>
     <div><label>Medio</label><select name="medio">${Object.entries(MEDIOS_FIN).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
-    <div><label>Importe financiado (€)</label><input name="principal" inputmode="decimal" placeholder="0,00"></div>
-    <div><label>TIN anual (%)</label><input name="tin" inputmode="decimal" placeholder="0 si es «sin intereses»"></div>
-    <div><label>Plazo (meses)</label><input name="plazo" type="number" min="1" max="600" step="1"></div>
-    <div><label>Fecha primera cuota</label><input name="fechaPrimeraCuota" type="date"></div>
+    <div class="fin-solo-manual"><label>Cuota mensual (€)</label><input name="cuotaManual" inputmode="decimal" placeholder="0,00"></div>
+    <div>${L('Importe financiado (€)', 'Capital prestado (€, opcional)')}<input name="principal" inputmode="decimal" placeholder="0,00"></div>
+    <div>${L('TIN anual (%)', 'TIN anual (%, opcional)')}<input name="tin" inputmode="decimal" placeholder="0 si es «sin intereses»"></div>
+    <div>${L('Plazo (meses)', 'Nº de cuotas')}<input name="plazo" type="number" min="1" max="600" step="1"></div>
+    <div>${L('Fecha primera cuota', 'Fecha del primer cobro')}<input name="fechaPrimeraCuota" type="date"></div>
     <div><label>Día de cobro</label><select name="diaCobro">${opcionesDiaCobro()}</select></div>
-    <div><label>Comisión de apertura (€, opcional)</label><input name="comisionApertura" inputmode="decimal" placeholder="0,00"></div>
-    <div><label>Comisión mensual (€, opcional)</label><input name="comisionMensual" inputmode="decimal" placeholder="0,00"></div>
+    <div class="fin-solo-manual"><label>Fecha de la última cuota (o indica el nº de cuotas)</label><input name="fechaUltimaCuota" type="date"></div>
+    <div class="fin-solo-calc"><label>Comisión de apertura (€, opcional)</label><input name="comisionApertura" inputmode="decimal" placeholder="0,00"></div>
+    <div class="fin-solo-calc"><label>Comisión mensual (€, opcional)</label><input name="comisionMensual" inputmode="decimal" placeholder="0,00"></div>
     <div><label>TAE que te indican (%, opcional)</label><input name="taeIntroducida" inputmode="decimal" placeholder="p. ej. 21,99"></div>
+    <details class="full fin-solo-manual fin-cuotas"><summary>Editar cuotas una a una (opcional)</summary>
+      <p class="muted small" style="margin:6px 0">Deja vacío para usar la cuota mensual. Útil si la primera o la última cuota son distintas.</p>
+      <div class="fin-cuotas-tabla table-wrap"></div>
+      <button type="button" class="btn small" data-fin-reset-cuotas>Quitar importes editados</button>
+    </details>
     <div class="full fin-preview" aria-live="polite"></div>
   </div>`;
 }
@@ -945,21 +973,70 @@ function opcionesDiaCobro() {
   return Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">Día ${i + 1}</option>`).join('') + `<option value="${FC.DIA_ULTIMO}">Último día del mes</option>`;
 }
 const leerDiaCobro = v => v === FC.DIA_ULTIMO ? FC.DIA_ULTIMO : Number(v);
-function finForm(sel) { const el = $(sel); const q = n => el.querySelector(`[name="${n}"]`); return { el, medio: q('medio'), principal: q('principal'), tin: q('tin'), plazo: q('plazo'), fechaPrimeraCuota: q('fechaPrimeraCuota'), diaCobro: q('diaCobro'), comisionApertura: q('comisionApertura'), comisionMensual: q('comisionMensual'), taeIntroducida: q('taeIntroducida'), preview: el.querySelector('.fin-preview') }; }
+function finForm(sel) {
+  const el = $(sel), q = n => el.querySelector(`[name="${n}"]`);
+  return { el, medio: q('medio'), principal: q('principal'), tin: q('tin'), plazo: q('plazo'), fechaPrimeraCuota: q('fechaPrimeraCuota'), diaCobro: q('diaCobro'),
+    comisionApertura: q('comisionApertura'), comisionMensual: q('comisionMensual'), taeIntroducida: q('taeIntroducida'), cuotaManual: q('cuotaManual'), fechaUltimaCuota: q('fechaUltimaCuota'),
+    modo: () => el.querySelector('[name="modoFin"]:checked')?.value === 'manual' ? 'manual' : 'calculado',
+    tabla: el.querySelector('.fin-cuotas-tabla'), details: el.querySelector('.fin-cuotas'), preview: el.querySelector('.fin-preview') };
+}
+/** Cambia el modo visible (calcular / manual): campos y etiquetas. */
+function ponerModoFin(sel, modo) {
+  const f = finForm(sel), el = f.el.querySelector('.fin-fields');
+  el.dataset.modo = modo;
+  f.el.querySelector(`[name="modoFin"][value="${modo}"]`).checked = true;
+  el.querySelectorAll('.fin-solo-calc').forEach(x => { x.hidden = modo !== 'calculado'; });
+  el.querySelectorAll('.fin-solo-manual').forEach(x => { x.hidden = modo !== 'manual'; });
+  el.querySelectorAll('label[data-calc]').forEach(l => { l.textContent = modo === 'manual' ? l.dataset.manual : l.dataset.calc; });
+  f.tin.placeholder = modo === 'manual' ? 'Si no lo sabes, déjalo vacío' : '0 si es «sin intereses»';
+  f.principal.placeholder = modo === 'manual' ? 'Si no lo sabes, déjalo vacío' : '0,00';
+}
 function setFinFields(sel, d) {
-  const f = finForm(sel);
-  f.medio.value = d.medio || 'otro'; f.principal.value = fmtInput(d.principal); f.tin.value = fmtInputN(d.tin ?? 0); f.plazo.value = d.plazo || 12;
+  const f = finForm(sel), manual = d.modo === 'manual';
+  f.medio.value = d.medio || 'otro'; f.plazo.value = d.plazo || 12;
+  // En modo manual el capital/TIN guardados por compatibilidad no se muestran si el usuario no los indicó.
+  f.principal.value = manual && !d.capitalConocido ? '' : fmtInput(d.principal);
+  f.tin.value = manual ? (d.tinConocido ? fmtInputN(d.tin) : '') : fmtInputN(d.tin ?? 0);
+  f.cuotaManual.value = manual ? fmtInput(d.cuotaManual) : '';
+  f.el._cuotasEditadas = manual ? Object.fromEntries(Object.entries(d.cuotasEditadas || {}).map(([n, v]) => [n, fmtInput(v)])) : {};
   f.fechaPrimeraCuota.value = d.fechaPrimeraCuota || '';
   // Deuda existente: su día de cobro. Nueva: sigue al día de la fecha de la 1.ª cuota hasta que el usuario lo cambie.
   f.diaCobro.value = String(FC.normalizarDiaCobro(d.diaCobro, d.fechaPrimeraCuota || todayISO()));
   f.diaCobro.dataset.auto = d.diaCobro === undefined || d.diaCobro === null ? '1' : '0';
   f.comisionApertura.value = d.comisionApertura ? fmtInput(d.comisionApertura) : '';
   f.comisionMensual.value = d.comisionMensual ? fmtInput(d.comisionMensual) : ''; f.taeIntroducida.value = d.taeIntroducida === null || d.taeIntroducida === undefined ? '' : fmtInputN(d.taeIntroducida);
-  previewFin(sel);
+  f.details.open = manual && Object.keys(f.el._cuotasEditadas).length > 0;
+  ponerModoFin(sel, manual ? 'manual' : 'calculado');
+  sincronizarUltimaCuota(sel); pintarTablaCuotas(sel); previewFin(sel);
+}
+/** Nº de cuotas -> fecha de la última (modo manual). */
+function sincronizarUltimaCuota(sel) {
+  const f = finForm(sel), n = Number(f.plazo.value);
+  f.fechaUltimaCuota.value = FC.isISO(f.fechaPrimeraCuota.value) && Number.isInteger(n) && n >= 1 && n <= 600 ? FC.fechaCuota(f.fechaPrimeraCuota.value, n, leerDiaCobro(f.diaCobro.value)) : '';
+}
+/** Fecha de la última cuota -> nº de cuotas (meses entre la 1.ª y la última, ambas incluidas). */
+function plazoDesdeUltimaCuota(sel) {
+  const f = finForm(sel), a = f.fechaPrimeraCuota.value, b = f.fechaUltimaCuota.value;
+  if (!FC.isISO(a) || !FC.isISO(b)) return;
+  const n = (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7)) + 1;
+  if (n >= 1 && n <= 600) f.plazo.value = n;
+}
+/** Tabla «Editar cuotas una a una»: solo se pinta con el desplegable abierto (puede haber cientos de cuotas). */
+function pintarTablaCuotas(sel) {
+  const f = finForm(sel), ed = f.el._cuotasEditadas || (f.el._cuotasEditadas = {});
+  if (!f.details.open) { f.tabla.innerHTML = ''; return; }
+  const n = Number(f.plazo.value), primera = f.fechaPrimeraCuota.value, dia = leerDiaCobro(f.diaCobro.value);
+  if (!(Number.isInteger(n) && n >= 1 && n <= 600)) { f.tabla.innerHTML = '<p class="muted small">Indica el nº de cuotas.</p>'; return; }
+  const cuota = parseImporte(f.cuotaManual.value), ph = isFinite(cuota) && cuota > 0 ? fmtInput(cuota) : '0,00';
+  f.tabla.innerHTML = `<table class="tabla-cuotas-edit"><thead><tr><th>Nº</th><th>Fecha</th><th>Importe (€)</th></tr></thead><tbody>${Array.from({ length: n }, (_, i) => {
+    const k = i + 1, fecha = FC.isISO(primera) ? fmtFecha(FC.fechaCuota(primera, k, dia)) : '—';
+    return `<tr><td>${k}</td><td>${fecha}</td><td><input data-cuota-n="${k}" inputmode="decimal" placeholder="${ph}" value="${esc(ed[k] || '')}" aria-label="Importe de la cuota ${k}"></td></tr>`;
+  }).join('')}</tbody></table>`;
 }
 function leerFinFields(sel) {
   const f = finForm(sel), n = (v, def = 0) => v.trim() === '' ? def : parseImporte(v);
-  const d = { medio: f.medio.value, principal: n(f.principal.value, NaN), tin: n(f.tin.value), plazo: Number(f.plazo.value), fechaPrimeraCuota: f.fechaPrimeraCuota.value, diaCobro: leerDiaCobro(f.diaCobro.value),
+  if (f.modo() === 'manual') return leerFinManual(f, n);
+  const d = { modo: 'calculado', medio: f.medio.value, principal: n(f.principal.value, NaN), tin: n(f.tin.value), plazo: Number(f.plazo.value), fechaPrimeraCuota: f.fechaPrimeraCuota.value, diaCobro: leerDiaCobro(f.diaCobro.value),
     comisionApertura: n(f.comisionApertura.value), comisionMensual: n(f.comisionMensual.value), taeIntroducida: f.taeIntroducida.value.trim() === '' ? null : parseImporte(f.taeIntroducida.value) };
   if (!(d.principal > 0)) d.error = 'Indica el importe financiado.';
   else if (!(d.tin >= 0) || d.tin > 100) d.error = 'El TIN debe estar entre 0 y 100 %.';
@@ -972,8 +1049,41 @@ function leerFinFields(sel) {
   if (!d.error) d.fechaPrimeraCuota = FC.fechaCuota(d.fechaPrimeraCuota, 1, d.diaCobro);
   return d;
 }
+/** Modo «Cuota manual»: cuota fija (con importes editables por cuota); capital, TIN y TAE opcionales. */
+function leerFinManual(f, n) {
+  const capTxt = f.principal.value.trim(), tinTxt = f.tin.value.trim();
+  const d = { modo: 'manual', medio: f.medio.value, cuotaManual: n(f.cuotaManual.value, NaN), plazo: Number(f.plazo.value), fechaPrimeraCuota: f.fechaPrimeraCuota.value, diaCobro: leerDiaCobro(f.diaCobro.value),
+    capitalConocido: capTxt !== '', tinConocido: capTxt !== '' && tinTxt !== '', principal: n(capTxt, NaN), tin: n(tinTxt, NaN),
+    comisionApertura: 0, comisionMensual: 0, taeIntroducida: f.taeIntroducida.value.trim() === '' ? null : parseImporte(f.taeIntroducida.value), cuotasEditadas: {} };
+  let edMal = false;
+  for (const [k, v] of Object.entries(f.el._cuotasEditadas || {})) {
+    const k2 = Number(k); if (!String(v).trim() || !(k2 <= d.plazo)) continue;
+    const x = parseImporte(v); if (!(x > 0)) { edMal = k2; continue; }
+    if (round2(x) !== round2(d.cuotaManual)) d.cuotasEditadas[k2] = round2(x);
+  }
+  if (!(d.cuotaManual > 0)) d.error = 'Indica el importe de la cuota mensual.';
+  else if (!Number.isInteger(d.plazo) || d.plazo < 1 || d.plazo > 600) d.error = 'Indica el nº de cuotas (1 a 600) o la fecha de la última cuota.';
+  else if (!FC.isISO(d.fechaPrimeraCuota)) d.error = 'Indica la fecha del primer cobro.';
+  else if (d.diaCobro !== FC.DIA_ULTIMO && !(Number.isInteger(d.diaCobro) && d.diaCobro >= 1 && d.diaCobro <= 31)) d.error = 'Elige el día de cobro (1 a 31 o «Último día del mes»).';
+  else if (edMal) d.error = `Revisa el importe de la cuota ${edMal} (o déjalo vacío para usar la cuota mensual).`;
+  else if (d.capitalConocido && !(d.principal > 0)) d.error = 'Revisa el capital prestado (o déjalo vacío si no lo sabes).';
+  else if (tinTxt !== '' && !(n(tinTxt, NaN) >= 0 && n(tinTxt, NaN) <= 100)) d.error = 'El TIN debe estar entre 0 y 100 % (o déjalo vacío).';
+  else if (d.taeIntroducida !== null && !isFinite(d.taeIntroducida)) d.error = 'Revisa la TAE (p. ej. 21,99).';
+  if (d.error) return d;
+  d.fechaPrimeraCuota = FC.fechaCuota(d.fechaPrimeraCuota, 1, d.diaCobro);
+  const total = round2(FC.pagosManual(d).reduce((a, b) => a + b, 0));
+  if (d.capitalConocido && total < round2(d.principal)) {
+    d.error = `Las cuotas suman ${eur(total)}, menos que el capital prestado (${eur(d.principal)}). Revisa la cuota, el nº de cuotas o el capital.`;
+    return d;
+  }
+  if (!d.tinConocido) d.tin = 0;
+  // Campos de compatibilidad (versiones < 3.5): principal y TIN que dan las mismas cuotas.
+  Object.assign(d, FC.compatManual(d));
+  return d;
+}
 function previewFin(sel) {
   const f = finForm(sel), d = leerFinFields(sel);
+  if (d.modo === 'manual') return previewManual(f, d);
   if (d.error) { f.preview.innerHTML = `<span class="muted small">${d.error === 'Indica la fecha de la primera cuota.' || d.error === 'Indica el importe financiado.' ? 'Rellena importe, TIN, plazo y fecha para ver la cuota y la TAE.' : esc(d.error)}</span>`; return; }
   const r = FC.resumenDeuda(d, [], null);
   const dif = r.diferenciaTAE;
@@ -985,16 +1095,62 @@ function previewFin(sel) {
       <div><span>Coste total (intereses + comisiones)</span><strong>${eur(r.totalCoste)}</strong></div>
       <div><span>TAE calculada</span><strong>${pct(r.tae)}</strong></div>
     </div>
-    ${r.taeIntroducida !== null ? `<p class="small ${Math.abs(dif) > 0.0025 ? 'warn-txt' : 'muted'}">TAE que te indican: ${pct(r.taeIntroducida)} · diferencia ${dif > 0 ? '+' : ''}${(dif * 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })} puntos${Math.abs(dif) > 0.0025 ? ' — revisa si hay comisiones o seguros que no hayas incluido.' : '.'}</p>` : ''}
+    ${notaTAE(r)}
     ${d.tin === 0 && r.totalCoste === 0 ? '<p class="small pos" style="margin:4px 0 0">Financiación sin intereses (TIN 0 % y sin comisiones): TAE 0 %.</p>' : ''}`;
+}
+function notaTAE(r) {
+  if (r.taeIntroducida === null || !isFinite(r.tae)) return '';
+  const dif = r.diferenciaTAE;
+  return `<p class="small ${Math.abs(dif) > 0.0025 ? 'warn-txt' : 'muted'}">TAE que te indican: ${pct(r.taeIntroducida)} · diferencia ${dif > 0 ? '+' : ''}${(dif * 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })} puntos${Math.abs(dif) > 0.0025 ? ' — revisa si hay comisiones o seguros que no hayas incluido.' : '.'}</p>`;
+}
+const fmtTIN = t => t === null || !isFinite(t) ? '—' : `${(Math.round(t * 100) / 100).toLocaleString(LOCALE, { maximumFractionDigits: 2 })} %`;
+function previewManual(f, d) {
+  if (d.error) {
+    const vacio = ['Indica el importe de la cuota mensual.', 'Indica la fecha del primer cobro.'].includes(d.error);
+    f.preview.innerHTML = `<span class="${vacio ? 'muted' : 'warn-txt'} small">${vacio ? 'Rellena la cuota, el nº de cuotas y la fecha del primer cobro para ver el calendario.' : esc(d.error)}</span>`;
+    return;
+  }
+  // Al editar una deuda existente, lo pendiente descuenta las cuotas ya marcadas como pagadas.
+  const fm = f.el.closest('#deudaForm'), idEl = fm && fm.querySelector('[name=id]'), idDeuda = idEl && idEl.value;
+  const pagadas = idDeuda ? Store.getMovimientos().filter(m => m.deudaId === idDeuda && m.cuotaN).map(m => m.cuotaN) : [];
+  const r = FC.resumenDeuda(d, pagadas, null), filas = r.filas, ultima = filas[filas.length - 1];
+  const nEd = Object.keys(d.cuotasEditadas).length;
+  f.preview.innerHTML = `<p class="small fin-fechas" style="margin:0 0 6px">📅 1.ª cuota el <strong>${fmtFecha(filas[0].fecha)}</strong>${filas.length > 1 ? `, después ${FC.textoDiaCobro(d.diaCobro)}; última el <strong>${fmtFecha(ultima.fecha)}</strong>` : ''} (${filas.length} cuota${filas.length === 1 ? '' : 's'}).</p>
+    <div class="fin-kpis">
+      <div><span>Cuota mensual</span><strong>${eur(d.cuotaManual)}</strong>${nEd ? `<small>${nEd} cuota${nEd === 1 ? '' : 's'} con otro importe</small>` : ''}</div>
+      <div><span>Total a pagar</span><strong>${eur(r.totalPagado)}</strong></div>
+      ${r.capitalConocido ? `
+      <div><span>Intereses totales</span><strong>${eur(r.totalIntereses)}</strong></div>
+      <div><span>TIN ${r.tinEsImplicito ? 'implícito' : ''}</span><strong>${fmtTIN(r.tinUsado)}</strong></div>
+      <div><span>TAE calculada</span><strong>${pct(r.tae)}</strong></div>` : `
+      <div><span>Pendiente</span><strong>${eur(r.pendiente)}</strong><small>${r.restantes} cuota${r.restantes === 1 ? '' : 's'} sin pagar</small></div>`}
+    </div>
+    ${r.capitalConocido ? '' : '<p class="small muted" style="margin:4px 0 0">Sin capital prestado, lo pendiente es la suma de las cuotas que faltan. Si lo indicas, calculo el TIN y la TAE implícitos y el desglose intereses/capital.</p>'}
+    ${r.tinNoCuadra ? `<p class="small warn-txt" style="margin:4px 0 0">Con el TIN indicado (${fmtTIN(d.tin)}) estas cuotas no cuadran con el capital (${r.descuadreTIN > 0 ? 'faltarían' : 'sobrarían'} ${eur(Math.abs(r.descuadreTIN))}). Para el desglose uso el TIN implícito: ${fmtTIN(r.tinUsado)}.</p>` : ''}
+    ${r.capitalConocido ? notaTAE(r) : ''}`;
 }
 ['#movFin', '#deudaFin'].forEach(sel => {
   $(sel).innerHTML = finFieldsHTML(sel);
+  $(sel)._cuotasEditadas = {};
   $(sel).addEventListener('input', e => {
-    const f = finForm(sel);
-    if (e.target === f.diaCobro) f.diaCobro.dataset.auto = '0';
-    else if (e.target === f.fechaPrimeraCuota && f.diaCobro.dataset.auto === '1' && FC.isISO(f.fechaPrimeraCuota.value)) f.diaCobro.value = String(+f.fechaPrimeraCuota.value.slice(8, 10));
+    const f = finForm(sel), t = e.target;
+    if (t.name === 'modoFin') {
+      // Al pasar a manual, un TIN 0 por defecto no es un dato del usuario: se deja vacío (opcional).
+      if (f.modo() === 'manual' && (f.tin.value.trim() === '0' || f.tin.value.trim() === '')) f.tin.value = '';
+      if (f.modo() === 'calculado' && f.tin.value.trim() === '') f.tin.value = '0';
+      ponerModoFin(sel, f.modo()); pintarTablaCuotas(sel); previewFin(sel); return;
+    }
+    if (t.dataset.cuotaN) { f.el._cuotasEditadas[t.dataset.cuotaN] = t.value; previewFin(sel); return; }
+    if (t === f.diaCobro) f.diaCobro.dataset.auto = '0';
+    else if (t === f.fechaPrimeraCuota && f.diaCobro.dataset.auto === '1' && FC.isISO(f.fechaPrimeraCuota.value)) f.diaCobro.value = String(+f.fechaPrimeraCuota.value.slice(8, 10));
+    if (t === f.fechaUltimaCuota) plazoDesdeUltimaCuota(sel); else if ([f.plazo, f.fechaPrimeraCuota, f.diaCobro].includes(t)) sincronizarUltimaCuota(sel);
+    if ([f.plazo, f.fechaPrimeraCuota, f.diaCobro, f.fechaUltimaCuota, f.cuotaManual].includes(t)) pintarTablaCuotas(sel);
     previewFin(sel);
+  });
+  $(sel).querySelector('.fin-cuotas').addEventListener('toggle', () => pintarTablaCuotas(sel));
+  $(sel).addEventListener('click', e => {
+    if (!e.target.closest('[data-fin-reset-cuotas]')) return;
+    $(sel)._cuotasEditadas = {}; pintarTablaCuotas(sel); previewFin(sel);
   });
 });
 
@@ -1066,6 +1222,11 @@ function generarDatosEjemplo(ym = UI.mes) {
   const fCoche = FC.addMonthsISO(hoy, -10);
   const dCoche = { id: uid(), nombre: 'Préstamo coche', medio: 'prestamo', principal: 12000, tin: 6.5, plazo: 60, fechaInicio: fCoche, fechaPrimeraCuota: FC.fechaCuota(FC.addMonthsISO(fCoche, 1), 1, FC.DIA_ULTIMO), diaCobro: FC.DIA_ULTIMO, comisionApertura: 120, comisionMensual: 0, taeIntroducida: 7.12, movimientoId: null, categoria: 'Transporte', cuenta: 'Banco' };
   deudas.push(dCoche); pagar(dCoche, FC.addMonthsISO(hoy, -1));
+  // v3.5 · Deuda en modo «Cuota manual»: solo se conoce la cuota (sin capital ni TIN)
+  const fMovil = FC.fechaCuota(FC.addMonthsISO(hoy, -5), 1, 10);
+  const dMovil = { id: uid(), nombre: 'Móvil a plazos (operadora)', medio: 'tienda', modo: 'manual', cuotaManual: 37.5, cuotasEditadas: { 24: 12.5 }, capitalConocido: false, tinConocido: false, plazo: 24, fechaInicio: fMovil, fechaPrimeraCuota: fMovil, diaCobro: 10, comisionApertura: 0, comisionMensual: 0, taeIntroducida: null, movimientoId: null, categoria: 'Electrónica', cuenta: 'Banco' };
+  Object.assign(dMovil, FC.compatManual(dMovil));
+  deudas.push(dMovil); pagar(dMovil, FC.addMonthsISO(hoy, -1));
   // Inversiones: compras periódicas, ventas parciales (FIFO) y precios manuales
   const activos = [], operaciones = [], precios = [];
   const activo = (nombre, tipo, isin, ticker, notas = '') => { const a = { id: uid(), nombre, tipo, isin, ticker, notas }; activos.push(a); return a; };

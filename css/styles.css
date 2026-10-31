@@ -287,3 +287,10 @@ select.cuenta-sel{width:100%}
   .cuenta-saldo{font-size:1.15rem}
   #cdBody td.actions,#traspasosBody td.actions{white-space:normal;width:1%}
 }
+/* v3.5 · modos de deuda */
+.fin-fields [hidden]{display:none!important}
+.fin-modo .seg{margin-top:2px}
+.fin-cuotas summary{cursor:pointer;font-weight:600;padding:4px 0}
+.fin-cuotas-tabla{max-height:300px;overflow:auto;margin-bottom:8px}
+.tabla-cuotas-edit input{width:110px;padding:6px 8px}
+.tabla-cuotas-edit td,.tabla-cuotas-edit th{padding:4px 8px}

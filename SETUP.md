@@ -106,6 +106,12 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.5 (deudas: «Calcular cuotas» o «Cuota manual»)
+
+- Sube **todos** los archivos (en `sw.js`, `VERSION = 'finanzas-v3.5.0'`). No hay archivos nuevos ni cambia nada en Google Cloud.
+- Las deudas que ya tienes se abren igual, en modo «Calcular cuotas»: no cambia ningún importe ni ninguna fecha.
+- Las deudas en «Cuota manual» guardan también un capital y un TIN equivalentes, así que un dispositivo con la v3.4 las sigue mostrando con cuotas casi iguales. Pero **si editas una deuda manual en un dispositivo con la v3.4**, pasa a «Calcular cuotas» y pierde las cuotas editadas una a una. Actualiza todos los dispositivos (abre la app con conexión en cada uno).
+
 ### Actualizar a la v3.4 (cuentas, traspasos y traspasos entre fondos)
 
 - Sube **todos** los archivos, incluidos los nuevos `js/cuentas-core.js` y `js/cuentas.js` (ya están en la lista `SHELL` de `sw.js`, con `VERSION = 'finanzas-v3.4.0'`). No cambia nada en Google Cloud: mismos permisos, mismo ID de cliente.

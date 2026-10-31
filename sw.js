@@ -5,7 +5,7 @@
      y el lector de texto Tesseract.js (se descarga solo cuando se usa por primera vez).
    - Nunca guarda nada de Google (inicio de sesión ni datos de Drive).
    Al cambiar archivos de la app, sube VERSION para forzar la actualización. */
-const VERSION = 'finanzas-v3.4.0';
+const VERSION = 'finanzas-v3.5.0';
 const CDN_CACHE = 'finanzas-cdn-v1'; // aparte: no se vacía al actualizar la app (las URL llevan versión)
 const CHART_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
 const SHELL = [
