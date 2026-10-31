@@ -242,7 +242,7 @@ function openRecDialog(r) {
   f.id.value = r?.id || '';
   f.querySelector(`input[name="tipo"][value="${r?.tipo || 'gasto'}"]`).checked = true;
   recSyncTipo(r?.categoria);
-  f.importe.value = r ? fmtInput(r.importe) : ''; f.descripcion.value = r?.descripcion || ''; f.cuenta.value = r?.cuenta || '';
+  f.importe.value = r ? fmtInput(r.importe) : ''; f.descripcion.value = r?.descripcion || ''; prepararCuenta(f.cuenta, r);
   if (!f.dia.options.length) f.dia.innerHTML = opcionesDiaCobro();
   f.dia.value = String(r?.dia || Number(todayISO().slice(8))); f.desde.value = r?.desde || monthKey(todayISO()); f.hasta.value = r?.hasta || '';
   f.querySelector(`input[name="naturaleza"][value="${r?.naturaleza || 'fijo'}"]`).checked = true; f.tipoIngreso.value = r?.tipoIngreso || 'nomina';
@@ -261,7 +261,7 @@ $('#recForm').addEventListener('submit', async e => {
   if (f.hasta.value && f.hasta.value < f.desde.value) return err('«Hasta» no puede ser anterior a «Desde».');
   const t = recTipo(), viejo = Store.get('recurrentes', f.id.value);
   if (!viejo && f.desde.value < monthKey(todayISO()) && !confirm(`Se crearán también los movimientos de los meses pasados desde ${monthLabel(f.desde.value)}. ¿Continuar?`)) return;
-  await Store.put('recurrentes', { ...(viejo || {}), id: f.id.value || null, tipo: t, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), cuenta: f.cuenta.value.trim(), dia, desde: f.desde.value, hasta: f.hasta.value, activo: f.activo.checked, naturaleza: f.querySelector('input[name="naturaleza"]:checked').value, tipoIngreso: f.tipoIngreso.value });
+  await Store.put('recurrentes', ponerCuenta({ ...(viejo || {}), id: f.id.value || null, tipo: t, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), dia, desde: f.desde.value, hasta: f.hasta.value, activo: f.activo.checked, naturaleza: f.querySelector('input[name="naturaleza"]:checked').value, tipoIngreso: f.tipoIngreso.value }, f.cuenta));
   $('#recDialog').close(); toast(viejo ? 'Recurrente actualizado (se aplica a los próximos meses)' : 'Recurrente creado');
 });
 $('#addRecBtn').addEventListener('click', () => openRecDialog());
@@ -302,7 +302,7 @@ function renderDeudas() {
   }).join('') : '<div class="card empty">No tienes deudas ni compras a plazos. Al añadir un gasto, marca «Compra financiada» o pulsa «＋ Nueva deuda».</div>';
 }
 function cuotaComoMovimiento(d, f) {
-  return { id: `cuota_${d.id}_${f.n}`, tipo: 'gasto', fecha: f.fecha, importe: f.pago, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '',
+  return { id: `cuota_${d.id}_${f.n}`, tipo: 'gasto', fecha: f.fecha, importe: f.pago, categoria: d.categoria || 'Deudas', cuenta: d.cuenta || '', ...(d.cuentaId ? { cuentaId: d.cuentaId } : {}),
     descripcion: `Cuota ${f.n}/${d.plazo} · ${d.nombre}`, naturaleza: 'fijo', deudaId: d.id, cuotaN: f.n, desglose: { interes: f.interes, amortizacion: f.amortizacion, comision: f.comision } };
 }
 async function marcarCuotas(deudaId, ns) {
@@ -340,7 +340,7 @@ function openDeudaDialog(d) {
   f.id.value = d?.id || ''; f.nombre.value = d?.nombre || '';
   const cats = Store.getCategorias('gasto'), cat = d?.categoria || (cats.includes('Deudas') ? 'Deudas' : 'Otros');
   f.categoria.innerHTML = [...new Set([...cats, cat])].map(c => `<option ${c === cat ? 'selected' : ''}>${esc(c)}</option>`).join('');
-  f.cuenta.value = d?.cuenta || ''; f.notas.value = d?.notas || '';
+  prepararCuenta(f.cuenta, d); f.notas.value = d?.notas || '';
   setFinFields('#deudaFin', d || { medio: 'prestamo', tin: '', plazo: 12, fechaPrimeraCuota: FC.addMonthsISO(todayISO(), 1) });
   $('#deudaDialogTitle').textContent = d ? 'Editar deuda' : 'Nueva deuda o préstamo';
   $('#deudaVinculada').hidden = !d?.movimientoId;
@@ -358,7 +358,7 @@ $('#deudaForm').addEventListener('submit', async e => {
     if (pag && cambiaCuadro && !confirm('Cambiar las condiciones recalcula el cuadro. Las cuotas ya marcadas como pagadas conservan el importe y el desglose con que se registraron. ¿Continuar?')) return;
   }
   delete fin.error;
-  await Store.put('deudas', { ...(viejo || {}), ...fin, id: f.id.value || null, nombre: f.nombre.value.trim(), categoria: f.categoria.value, cuenta: f.cuenta.value.trim(), notas: f.notas.value.trim(), fechaInicio: viejo?.fechaInicio || todayISO() });
+  await Store.put('deudas', ponerCuenta({ ...(viejo || {}), ...fin, id: f.id.value || null, nombre: f.nombre.value.trim(), categoria: f.categoria.value, notas: f.notas.value.trim(), fechaInicio: viejo?.fechaInicio || todayISO() }, f.cuenta));
   $('#deudaDialog').close(); toast('Deuda guardada');
 });
 $('#addDeudaBtn').addEventListener('click', () => openDeudaDialog());
@@ -447,7 +447,9 @@ function renderInversiones() {
 const Det = { id: null, adj: null };
 function openDetalle(id) {
   const x = Calc.cartera().activos.find(a => a.activo.id === id); if (!x) { if ($('#detDialog').open) $('#detDialog').close(); return; }
-  Det.id = id; const a = x.activo, opsById = Object.fromEntries(x.ops.map(o => [o.id, o]));
+  Det.id = id; const a = x.activo, opsById = Object.fromEntries(Store.list('operaciones').map(o => [o.id, o]));
+  const nomAct = i => Store.get('activos', i)?.nombre || '(activo borrado)';
+  const deTraspaso = o => o ? `<div class="muted small">↪ procedente de traspaso de ${esc(nomAct(o.activoId))} (${fmtFecha(o.fecha)})</div>` : '';
   $('#detTitulo').textContent = a.nombre;
   $('#detSub').textContent = [TIPOS_ACTIVO[a.tipo], a.isin && 'ISIN ' + a.isin, a.ticker && 'Ticker ' + a.ticker].filter(Boolean).join(' · ') + (a.notas ? ' — ' + a.notas : '');
   $('#detKpis').innerHTML = `<div class="fin-kpis">
@@ -458,12 +460,21 @@ function openDetalle(id) {
     <div><span>Ganancia no realizada</span><strong class="${clsNum(x.noRealizada)}">${signo(x.noRealizada)} (${pct(x.noRealizadaPct)})</strong></div>
     <div><span>Ganancia realizada</span><strong class="${clsNum(x.gananciaRealizada)}">${signo(x.gananciaRealizada)}</strong></div></div>
     ${x.errores.length ? `<p class="neg small">⚠ ${x.errores.map(e => esc(e.msg)).join('. ')}</p>` : ''}`;
-  $('#detLotes').innerHTML = x.lotes.length ? x.lotes.map(l => `<tr><td>${fmtFecha(l.fecha)}</td><td class="num">${fmtPart.format(l.participaciones)}${l.participaciones < l.iniciales ? `<div class="muted small">de ${fmtPart.format(l.iniciales)}</div>` : ''}</td><td class="num">${eurP(opsById[l.opId]?.precio)}</td><td class="num">${eurP(l.costeUnitario)}</td><td class="num">${eur(l.coste)}</td><td class="num ${x.precio !== null ? clsNum(l.participaciones * x.precio - l.coste) : ''}">${x.precio !== null ? signo(round2(l.participaciones * x.precio - l.coste)) : '—'}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Sin participaciones vivas.</td></tr>';
+  $('#detLotes').innerHTML = x.lotes.length ? x.lotes.map(l => `<tr><td>${fmtFecha(l.fecha)}${deTraspaso(l.origen)}</td><td class="num">${fmtPart.format(l.participaciones)}${l.participaciones < l.iniciales ? `<div class="muted small">de ${fmtPart.format(l.iniciales)}</div>` : ''}</td><td class="num">${l.origen ? '—' : eurP(opsById[l.opId]?.precio)}</td><td class="num">${eurP(l.costeUnitario)}</td><td class="num">${eur(l.coste)}</td><td class="num ${x.precio !== null ? clsNum(l.participaciones * x.precio - l.coste) : ''}">${x.precio !== null ? signo(round2(l.participaciones * x.precio - l.coste)) : '—'}</td></tr>`).join('') : '<tr><td colspan="6" class="empty">Sin participaciones vivas.</td></tr>';
   $('#detVentas').innerHTML = x.ventas.length ? x.ventas.slice().reverse().map(v => `<div class="venta">
       <div class="venta-head"><strong>Venta del ${fmtFecha(v.fecha)}</strong>: ${fmtPart.format(v.participaciones)} part. × ${eurP(v.precio)}${v.comisiones ? ` − ${eur(v.comisiones)} comisiones` : ''} = ${eur(v.importeNeto)} · coste FIFO ${eur(v.coste)} · <span class="${clsNum(v.ganancia)}"><strong>${signo(v.ganancia)}</strong></span>${v.incompleta ? ' <span class="neg">(vendes más de lo que tenías)</span>' : ''}</div>
       <table class="compact"><thead><tr><th>Lote consumido (compra)</th><th class="num">Participaciones</th><th class="num">Coste unitario</th><th class="num">Coste</th></tr></thead><tbody>
-      ${v.consumos.map(c => `<tr><td>${fmtFecha(c.fecha)}</td><td class="num">${fmtPart.format(c.participaciones)}</td><td class="num">${eurP(c.costeUnitario)}</td><td class="num">${eur(c.coste)}</td></tr>`).join('')}</tbody></table></div>`).join('') : '<p class="muted">Sin ventas.</p>';
-  $('#detOps').innerHTML = FC.ordenarOperaciones(x.ops).reverse().map(o => `<tr><td>${fmtFecha(o.fecha)}</td><td><span class="tag ${o.tipo === 'compra' ? 'gasto' : 'ingreso'}">${o.tipo === 'compra' ? 'Compra' : 'Venta'}</span></td><td class="num">${fmtPart.format(o.participaciones)}</td><td class="num">${eurP(o.precio)}</td><td class="num hide-sm">${o.comisiones ? eur(o.comisiones) : '—'}</td><td class="num">${eur(round2(o.participaciones * o.precio + (o.tipo === 'compra' ? o.comisiones : -o.comisiones)))}</td>
+      ${v.consumos.map(c => `<tr><td>${fmtFecha(c.fecha)}${deTraspaso(c.origen)}</td><td class="num">${fmtPart.format(c.participaciones)}</td><td class="num">${eurP(c.costeUnitario)}</td><td class="num">${eur(c.coste)}</td></tr>`).join('')}</tbody></table></div>`).join('') : '<p class="muted">Sin ventas.</p>';
+  // Traspasos entre fondos (entradas y salidas)
+  const tfs = Store.list('traspasosFondos').filter(t => t.origenId === id || t.destinoId === id).sort((p, q) => q.fecha.localeCompare(p.fecha));
+  const infoTf = Object.fromEntries([...(x.traspasosEntrada || []), ...(x.traspasosSalida || [])].map(t => [t.traspasoId + (t.origenId ? '_in' : '_out'), t]));
+  $('#detTraspasos').innerHTML = tfs.length ? `<h4>Traspasos entre fondos</h4><div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>Traspaso</th><th class="num">Part.</th><th class="num">Coste traspasado</th><th></th></tr></thead><tbody>
+    ${tfs.map(t => { const sale = t.origenId === id, i = infoTf[t.id + (sale ? '_out' : '_in')];
+      return `<tr><td>${fmtFecha(t.fecha)}</td><td>${sale ? `⇢ a <strong>${esc(nomAct(t.destinoId))}</strong>` : `⇠ desde <strong>${esc(nomAct(t.origenId))}</strong>`}${t.todas ? ' <span class="badge">todas</span>' : ''}${t.notas ? `<div class="muted small">${esc(t.notas)}</div>` : ''}</td>
+        <td class="num">${sale ? '−' + fmtPart.format(i ? i.participaciones : t.participaciones) : '+' + fmtPart.format(i ? i.participaciones : t.participacionesDestino)}</td><td class="num">${i ? eur(i.coste) : '—'}</td>
+        <td class="actions"><button class="btn-sm" data-tf-edit="${t.id}" title="Editar">✏️</button> <button class="btn-sm btn-danger" data-tf-del="${t.id}" title="Eliminar">🗑️</button></td></tr>`; }).join('')}</tbody></table></div>
+    <p class="muted small">Sin ganancia ni pérdida: el fondo de destino hereda el coste y las fechas originales de compra (FIFO).</p>` : '';
+  $('#detOps').innerHTML = FC.ordenarOperaciones(x.ops).reverse().map(o => `<tr><td>${fmtFecha(o.fecha)}</td><td><span class="tag ${o.tipo === 'compra' ? 'gasto' : 'ingreso'}">${o.tipo === 'compra' ? 'Compra' : 'Venta'}</span></td><td class="num">${fmtPart.format(o.participaciones)}</td><td class="num">${eurP(o.precio)}</td><td class="num hide-sm">${o.comisiones ? eur(o.comisiones) : '—'}</td><td class="num">${eur(round2(o.participaciones * o.precio + (o.tipo === 'compra' ? o.comisiones : -o.comisiones)))}${o.cuentaId && Store.get('cuentas', o.cuentaId) ? `<div class="muted small">${esc(Store.get('cuentas', o.cuentaId).nombre)}</div>` : ''}</td>
     <td class="actions"><button class="btn-sm" data-op-edit="${o.id}" title="Editar">✏️</button> <button class="btn-sm btn-danger" data-op-del="${o.id}" title="Eliminar">🗑️</button></td></tr>`).join('') || '<tr><td colspan="7" class="empty">Sin operaciones.</td></tr>';
   const precios = x.precios.slice().sort((p, q) => q.fecha.localeCompare(p.fecha));
   $('#detPrecios').innerHTML = precios.length ? precios.map(p => `<tr><td>${fmtFecha(p.fecha)}</td><td class="num">${eurP(p.precio)}</td><td class="actions"><button class="btn-sm btn-danger" data-precio-del="${p.id}" title="Eliminar">🗑️</button></td></tr>`).join('') : '<tr><td colspan="3" class="empty">Sin precios manuales: se usa el de la última operación.</td></tr>';
@@ -487,13 +498,24 @@ $('#activoForm').addEventListener('submit', async e => {
   const nuevo = !f.id.value;
   const a = await Store.put('activos', { ...(Store.get('activos', f.id.value) || {}), id: f.id.value || null, nombre: f.nombre.value, tipo: f.tipo.value, isin, ticker: f.ticker.value, notas: f.notas.value.trim() });
   $('#activoDialog').close(); toast('Activo guardado');
-  if (nuevo) openOpDialog(null, a.id); else if ($('#detDialog').open) openDetalle(a.id);
+  if (nuevo && typeof CuUI !== 'undefined' && CuUI.tfNuevo) tfFondoCreado(a);
+  else if (nuevo) openOpDialog(null, a.id); else if ($('#detDialog').open) openDetalle(a.id);
 });
 $('#activoDelete').addEventListener('click', async () => {
   const id = $('#activoForm').id.value, n = Store.list('operaciones').filter(o => o.activoId === id).length;
+  const ntf = Store.list('traspasosFondos').filter(t => t.origenId === id || t.destinoId === id).length;
+  if (ntf) return alert(`Este fondo tiene ${ntf} traspaso${ntf === 1 ? '' : 's'} entre fondos. Bórralos antes (en el detalle del fondo) para no descuadrar el coste del otro fondo.`);
   if (!confirm(`¿Eliminar este activo${n ? ` y sus ${n} operaciones` : ''} y su historial de precios?`)) return;
   await Store.deleteActivo(id); $('#activoDialog').close(); if ($('#detDialog').open) $('#detDialog').close(); toast('Activo eliminado');
 });
+/** v3.4: comprueba un cambio en operaciones o traspasos entre fondos con el motor FIFO de toda la cartera.
+    Solo cuentan los errores NUEVOS (los que ya hubiera en los datos no bloquean cambios que no tienen que ver). */
+function erroresCambioCartera({ ops = Store.list('operaciones'), tfs = Store.list('traspasosFondos') } = {}) {
+  const antes = FC.carteraFIFO(Store.list('operaciones'), Store.list('traspasosFondos')), despues = FC.carteraFIFO(ops, tfs);
+  const nombre = id => Store.get('activos', id)?.nombre || 'activo';
+  const out = FC.erroresNuevos(antes, despues).map(e => ({ ...e, texto: `${nombre(e.activoId || Object.keys(despues.porActivo).find(k => despues.porActivo[k].errores.includes(e)))}: ${e.msg}` }));
+  return out;
+}
 function opTipo() { return $('#opForm').querySelector('input[name="tipo"]:checked').value; }
 function previewOp() {
   const f = $('#opForm'), part = parseImporte(f.participaciones.value || ''), precio = parseImporte(f.precio.value || ''), com = parseImporte(f.comisiones.value || '0') || 0;
@@ -501,7 +523,7 @@ function previewOp() {
   let txt = '';
   if (part > 0 && precio >= 0) txt = venta ? `Importe neto de la venta: ${eur(part * precio - com)}` : `Coste de la compra: ${eur(part * precio + com)}`;
   if (venta && f.activoId.value && FC.isISO(f.fecha.value)) {
-    const disp = FC.disponibleEn(Store.list('operaciones').filter(o => o.activoId === f.activoId.value), f.fecha.value, f.id.value || null);
+    const disp = FC.disponibleActivo(f.activoId.value, Store.list('operaciones'), Store.list('traspasosFondos'), f.fecha.value, f.id.value || null);
     txt += `${txt ? ' · ' : ''}Disponibles el ${fmtFecha(f.fecha.value)}: ${fmtPart.format(disp)} participaciones`;
   }
   $('#opPreview').textContent = txt;
@@ -515,6 +537,13 @@ function openOpDialog(op, activoId, tipo = 'compra') {
   f.querySelector(`input[name="tipo"][value="${op?.tipo || tipo}"]`).checked = true;
   f.fecha.value = op?.fecha || todayISO(); f.participaciones.value = op ? fmtInputN(op.participaciones) : ''; f.precio.value = op ? fmtInputN(op.precio) : '';
   f.comisiones.value = op?.comisiones ? fmtInput(op.comisiones) : ''; f.notas.value = op?.notas || '';
+  // v3.4: cuenta desde la que se paga la compra / a la que llega la venta (opcional)
+  const hayCuentas = Store.list('cuentas').length > 0;
+  let cid = op ? (op.cuentaId || '') : '';
+  if (!op) { const ult = Store.list('operaciones').filter(o => o.cuentaId && Store.get('cuentas', o.cuentaId)?.activa !== false).sort((a, b) => (b.creado || 0) - (a.creado || 0) || b.fecha.localeCompare(a.fecha))[0]; cid = ult ? ult.cuentaId : ''; }
+  f.cuentaId.innerHTML = opcionesCuenta(cid, { vacia: '— Sin cuenta (no mueve saldos) —' }); f.cuentaId.value = Store.get('cuentas', cid) ? cid : '';
+  $('#opCuentaRow').hidden = false; $('#opCuenta').disabled = !hayCuentas;
+  $('#opCuentaInfo').textContent = hayCuentas ? 'La compra resta de esta cuenta (participaciones × precio + comisiones); la venta suma lo cobrado. No es gasto ni ingreso.' : 'Crea tus cuentas en la pestaña «Cuentas» para que las compras resten del saldo de tu cuenta de inversión.';
   $('#opDialogTitle').textContent = op ? 'Editar operación' : 'Nueva operación';
   previewOp(); $('#opDialog').showModal();
 }
@@ -529,11 +558,10 @@ $('#opForm').addEventListener('submit', async e => {
   if (!(com >= 0) || !isFinite(com)) return err('Revisa las comisiones.');
   const viejo = Store.get('operaciones', f.id.value);
   const op = { ...(viejo || {}), id: f.id.value || uid(), activoId: f.activoId.value, tipo: opTipo(), fecha: f.fecha.value, participaciones: part, precio, comisiones: com, notas: f.notas.value.trim(), creado: viejo?.creado || Date.now() };
-  // Comprueba que todas las ventas del activo siguen cabiendo (FIFO) con este cambio
-  const ops = Store.list('operaciones').filter(o => o.activoId === op.activoId && o.id !== op.id).concat(op);
-  const r = FC.fifo(ops);
-  if (r.errores.length) return err(r.errores[0].msg + '. Revisa la fecha y las participaciones.');
-  if (viejo && viejo.activoId !== op.activoId) { const r2 = FC.fifo(Store.list('operaciones').filter(o => o.activoId === viejo.activoId && o.id !== op.id)); if (r2.errores.length) return err('Al mover la operación a otro activo, el activo original quedaría con ventas sin participaciones.'); }
+  delete op.cuentaId; if (f.cuentaId.value && Store.get('cuentas', f.cuentaId.value)) op.cuentaId = f.cuentaId.value;
+  // Comprueba que todas las ventas (y traspasos entre fondos) siguen cabiendo (FIFO) con este cambio
+  const errs = erroresCambioCartera({ ops: Store.list('operaciones').filter(o => o.id !== op.id).concat(op) });
+  if (errs.length) return err(errs[0].texto + '. Revisa la fecha y las participaciones.');
   await Store.put('operaciones', op);
   $('#opDialog').close(); toast(op.tipo === 'compra' ? 'Compra guardada' : 'Venta guardada');
   if ($('#detDialog').open) openDetalle(Det.id);
@@ -579,11 +607,11 @@ function planCSV(text) {
   }
   // Validación FIFO por activo con las operaciones nuevas
   const fifoErr = [];
-  const ids = new Set(nuevasOps.map(o => o.activoId));
-  for (const id of ids) {
-    const r = FC.fifo([...ops.filter(o => o.activoId === id), ...nuevasOps.filter(o => o.activoId === id)]);
-    const nombre = nuevasOps.find(o => o.activoId === id)._a.nombre;
-    r.errores.forEach(e => fifoErr.push(`${nombre}: ${e.msg}`));
+  const antes = FC.carteraFIFO(ops, Store.list('traspasosFondos')), despues = FC.carteraFIFO([...ops, ...nuevasOps], Store.list('traspasosFondos'));
+  for (const e of FC.erroresNuevos(antes, despues)) {
+    const id = e.activoId || Object.keys(despues.porActivo).find(k => despues.porActivo[k].errores.includes(e));
+    const nombre = (nuevasOps.find(o => o.activoId === id)?._a || Store.get('activos', id) || { nombre: 'activo' }).nombre;
+    fifoErr.push(`${nombre}: ${e.msg}`);
   }
   return { filas, errores, nuevosActivos: [...nuevosActivos.values()], nuevasOps, duplicadas, fifoErr };
 }
@@ -645,8 +673,7 @@ document.addEventListener('click', async e => {
   if (d.opEdit) openOpDialog(Store.get('operaciones', d.opEdit));
   if (d.opDel) {
     const op = Store.get('operaciones', d.opDel);
-    const r = FC.fifo(Store.list('operaciones').filter(o => o.activoId === op.activoId && o.id !== op.id));
-    if (r.errores.length) return toast('No se puede borrar: dejaría ventas sin participaciones. Borra antes la venta.');
+    if (erroresCambioCartera({ ops: Store.list('operaciones').filter(o => o.id !== op.id) }).length) return toast('No se puede borrar: dejaría ventas o traspasos sin participaciones. Borra antes la venta o el traspaso.');
     if (confirm('¿Eliminar esta operación?')) { await Store.remove('operaciones', d.opDel); openDetalle(Det.id); toast('Operación eliminada'); }
   }
   if (d.precioDel && confirm('¿Eliminar este precio?')) { await Store.remove('precios', d.precioDel); openDetalle(Det.id); }
@@ -655,6 +682,8 @@ $('#detEditar').addEventListener('click', () => openActivoDialog(Store.get('acti
 $('#detOp').addEventListener('click', () => openOpDialog(null, Det.id));
 $('#detVenta').addEventListener('click', () => openOpDialog(null, Det.id, 'venta'));
 $('#detPrecio').addEventListener('click', () => openPrecioDialog(Det.id));
+$('#detTraspaso').addEventListener('click', () => openTfDialog(null, Det.id));
+$('#detAsignar').addEventListener('click', () => openAsignarDialog(Det.id));
 
 /* Ajustes de garantías / notificaciones / OCR */
 $('#ajAvisoDias').addEventListener('change', async e => { const n = Math.max(1, Math.min(365, Math.round(Number(e.target.value) || 30))); e.target.value = n; await Store.setAjuste('avisoGarantiaDias', n); renderBannerGarantias(); toast('Aviso de garantías: ' + n + ' días antes'); });

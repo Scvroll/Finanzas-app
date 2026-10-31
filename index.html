@@ -48,6 +48,7 @@
   <nav class="tabs" role="tablist">
     <button data-view="resumen" class="active">Resumen</button>
     <button data-view="movimientos">Movimientos</button>
+    <button data-view="cuentas">Cuentas</button>
     <button data-view="deudas">Deudas</button>
     <button data-view="inversiones">Inversiones</button>
     <button data-view="garantias">Garantías</button>
@@ -67,10 +68,13 @@
     <h2 id="resumenTitle" style="margin:4px 0 12px"></h2>
     <div class="grid kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="label">Ingresos</div><div class="value pos" id="kpiIngresos">0 €</div><div class="sub" id="kpiIngresosN"></div></div>
-      <div class="kpi"><div class="label">Gastos</div><div class="value neg" id="kpiGastos">0 €</div><div class="sub" id="kpiGastosN"></div></div>
-      <div class="kpi"><div class="label">Balance</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
-      <div class="kpi"><div class="label">Tasa de ahorro</div><div class="value" id="kpiAhorro">—</div><div class="sub">Balance / ingresos</div></div>
+      <div class="kpi"><div class="label">Gasto real</div><div class="value neg" id="kpiGastos">0 €</div><div class="sub" id="kpiGastosN"></div></div>
+      <div class="kpi"><div class="label">Ahorro (ingresos − gasto)</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
+      <div class="kpi"><div class="label">Tasa de ahorro</div><div class="value" id="kpiAhorro">—</div><div class="sub">Ahorro / ingresos</div></div>
+      <div class="kpi"><div class="label">Invertido (neto)</div><div class="value" id="kpiInvertido">0 €</div><div class="sub" id="kpiInvertidoSub">Compras − ventas del mes</div></div>
     </div>
+    <p class="muted small" id="kpiTraspasos" style="margin:-8px 0 12px" hidden></p>
+    <div class="card" id="patrimonioCard" hidden><div class="card-head"><h3 style="margin:0">Patrimonio (hoy)</h3><button class="btn-sm" data-ir-cuentas>Ver cuentas</button></div><div id="patrimonioBody"></div></div>
     <div class="card"><h3>Desglose del mes</h3><div id="desgloseBody"></div></div>
     <div class="grid charts">
       <div class="card"><h3>Gastos por categoría</h3><div class="chart-box"><canvas id="chartCategorias"></canvas><div class="empty" id="chartCategoriasEmpty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center">Sin gastos este mes</div></div></div>
@@ -122,6 +126,43 @@
     </div>
   </section>
 
+  <!-- CUENTAS (v3.4) -->
+  <section class="view" id="view-cuentas">
+    <div class="card-head" style="margin-bottom:12px"><h2 style="margin:0">Cuentas y efectivo</h2>
+      <div class="btn-row"><button id="addCuentaBtn">＋ Cuenta</button><button class="btn-primary" id="addTraspasoBtn">⇄ Traspaso</button></div></div>
+    <div class="notice" id="cuentasMigrar" hidden></div>
+    <div class="grid kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Dinero en cuentas</div><div class="value" id="ckTotal">0 €</div><div class="sub" id="ckTotalSub"></div></div>
+      <div class="kpi"><div class="label">Inversiones (valor)</div><div class="value" id="ckInv">0 €</div><div class="sub">Último precio anotado</div></div>
+      <div class="kpi"><div class="label">Deuda pendiente</div><div class="value neg" id="ckDeuda">0 €</div><div class="sub">Capital por devolver</div></div>
+      <div class="kpi"><div class="label">Patrimonio neto</div><div class="value" id="ckNeto">0 €</div><div class="sub">Cuentas + inversiones − deudas</div></div>
+    </div>
+    <div class="cuentas-grid" id="cuentasGrid"></div>
+    <div class="card" id="cuentaDetalle" hidden>
+      <div class="card-head"><h3 style="margin:0" id="cdTitulo">Movimientos de la cuenta</h3>
+        <div class="toolbar" style="margin:0"><div><label for="cdFiltro">Cuenta</label><select id="cdFiltro"></select></div><div><label for="cdPeriodo">Periodo</label><select id="cdPeriodo"><option value="12">Últimos 12 meses</option><option value="mes">Mes seleccionado</option><option value="anio">Año seleccionado</option><option value="todo">Todo</option></select></div></div></div>
+      <div class="chart-box" style="height:220px"><canvas id="chartCuenta"></canvas></div>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>Concepto</th><th class="num">Importe</th><th class="num">Saldo</th><th></th></tr></thead><tbody id="cdBody"></tbody></table></div>
+      <p class="muted small" id="cdNota" style="margin-bottom:0"></p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h3 style="margin:0">Traspasos entre cuentas</h3><button class="btn-sm" id="addTraspasoBtn2">⇄ Nuevo traspaso</button></div>
+      <div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>De → a</th><th class="num">Importe</th><th class="num hide-sm">Comisión</th><th></th></tr></thead><tbody id="traspasosBody"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h3>Cómo se calcula</h3>
+      <details><summary>Saldo, traspasos, inversiones y ajustes</summary>
+        <ul class="small">
+          <li><strong>Saldo</strong> = saldo inicial (el que tenías al empezar el día de la «fecha del saldo») + ingresos − gastos (también cuotas de deudas y repostajes) ± traspasos − compras de inversión + ventas de inversión ± ajustes. Solo cuenta lo que tiene fecha igual o posterior a la del saldo inicial.</li>
+          <li><strong>Traspasos</strong> entre tus cuentas no son ingresos ni gastos: no aparecen en el resumen, las categorías ni la tasa de ahorro. Si el banco cobra una comisión, esa comisión sí es un gasto real (categoría «Comisiones»).</li>
+          <li><strong>Inversiones</strong>: una compra resta de su cuenta participaciones × precio + comisiones; una venta suma lo cobrado menos comisiones. No son gastos ni ingresos: el dinero pasa de «saldo en cuenta» a «capital invertido». Solo la ganancia o pérdida al vender es un resultado.</li>
+          <li><strong>Ajustar saldo</strong> apunta la diferencia entre lo que dice la app y lo que dice tu banco. No cuenta como ingreso ni gasto.</li>
+          <li>Las compras financiadas no restan de la cuenta: restan sus cuotas cuando las pagas.</li>
+        </ul></details>
+      <div class="toolbar" style="margin-top:10px"><div class="grow"><label for="cuentaDefecto">Cuenta por defecto al apuntar un gasto o ingreso (este dispositivo)</label><select id="cuentaDefecto"></select></div></div>
+    </div>
+  </section>
+
   <!-- DEUDAS -->
   <section class="view" id="view-deudas">
     <div class="grid kpis" style="margin-bottom:16px">
@@ -148,6 +189,7 @@
         <div class="row-actions">
           <button id="csvBtn">⬆️ Importar CSV</button>
           <button id="addActivoBtn">＋ Nuevo activo</button>
+          <button id="addTfBtn" title="Traspaso entre fondos de inversión (sin tributar)">⇄ Traspaso entre fondos</button>
           <button class="btn-primary" id="addOpBtn">＋ Compra / venta</button>
         </div>
       </div>
@@ -163,7 +205,7 @@
       <div class="card">
         <h3>Ganancias realizadas por año</h3>
         <div class="table-wrap"><table><thead><tr><th>Año</th><th class="num">Ganancia / pérdida</th></tr></thead><tbody id="realizadasBody"></tbody></table></div>
-        <p class="muted small" style="margin-bottom:0">⚖️ En España, al vender participaciones de un mismo valor, Hacienda obliga a usar <strong>FIFO</strong>: se consideran vendidas primero las que compraste antes. Así se calcula aquí. Es orientativo: no contempla traspasos entre fondos, la regla de los 2 meses ni dividendos; consulta tu borrador o a un asesor.</p>
+        <p class="muted small" style="margin-bottom:0">⚖️ En España, al vender participaciones de un mismo valor, Hacienda obliga a usar <strong>FIFO</strong>: se consideran vendidas primero las que compraste antes. Así se calcula aquí. En un <strong>traspaso entre fondos</strong> no hay ganancia: el fondo nuevo hereda el coste y las fechas de compra originales. Es orientativo: no contempla la regla de los 2 meses ni dividendos; consulta tu borrador o a un asesor.</p>
       </div>
       <div class="card"><h3>Distribución por tipo (valor)</h3><div class="chart-box" style="height:260px"><canvas id="chartInversiones"></canvas></div></div>
     </div>
@@ -502,6 +544,7 @@
       <div><label>Participaciones</label><input name="participaciones" inputmode="decimal" placeholder="p. ej. 12,3456"></div>
       <div><label>Precio por participación (€)</label><input name="precio" inputmode="decimal" placeholder="p. ej. 45,67"></div>
       <div><label>Comisiones (€)</label><input name="comisiones" inputmode="decimal" placeholder="0,00"></div>
+      <div class="full" id="opCuentaRow"><label for="opCuenta">Cuenta (opcional)</label><select id="opCuenta" name="cuentaId"></select><div class="muted small" id="opCuentaInfo"></div></div>
       <div class="full"><label>Notas</label><input name="notas"></div>
       <p class="full small" id="opPreview" style="margin:0"></p>
     </div>
@@ -529,13 +572,14 @@
 <dialog id="detDialog" class="wide xl">
   <div class="dlg-body">
     <div class="card-head"><div><h3 id="detTitulo" style="margin:0"></h3><div class="muted small" id="detSub"></div></div>
-      <div class="row-actions"><button class="btn-sm" id="detOp">＋ Compra</button><button class="btn-sm" id="detVenta">− Venta</button><button class="btn-sm" id="detPrecio">💲 Precio</button><button class="btn-sm" id="detEditar">✏️ Editar</button></div></div>
+      <div class="row-actions"><button class="btn-sm" id="detOp">＋ Compra</button><button class="btn-sm" id="detVenta">− Venta</button><button class="btn-sm" id="detPrecio">💲 Precio</button><button class="btn-sm" id="detTraspaso">⇄ Traspaso</button><button class="btn-sm" id="detAsignar">🏦 Asignar cuenta</button><button class="btn-sm" id="detEditar">✏️ Editar</button></div></div>
     <div id="detKpis"></div>
     <h4>Lotes vivos (FIFO)</h4>
     <div class="table-wrap"><table class="compact"><thead><tr><th>Compra</th><th class="num">Participaciones</th><th class="num">Precio</th><th class="num">Coste unitario*</th><th class="num">Coste</th><th class="num">No realizada</th></tr></thead><tbody id="detLotes"></tbody></table></div>
     <p class="muted small">* Coste unitario incluye la parte proporcional de las comisiones de compra.</p>
     <h4>Ventas y lotes consumidos</h4>
     <div id="detVentas"></div>
+    <div id="detTraspasos"></div>
     <div class="two-col">
       <div><h4>Operaciones</h4><div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Part.</th><th class="num">Precio</th><th class="num hide-sm">Comis.</th><th class="num">Importe</th><th></th></tr></thead><tbody id="detOps"></tbody></table></div></div>
       <div><h4>Historial de precios</h4><div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th class="num">Precio</th><th></th></tr></thead><tbody id="detPrecios"></tbody></table></div>
@@ -543,6 +587,110 @@
     </div>
     <div class="dialog-actions"><button type="button" data-close>Cerrar</button></div>
   </div>
+</dialog>
+
+<!-- Cuenta (v3.4) -->
+<dialog id="cuentaDialog">
+  <form id="cuentaForm" method="dialog" novalidate>
+    <h3 id="cuentaDialogTitle">Nueva cuenta</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div class="full"><label for="cuNombre">Nombre</label><input id="cuNombre" name="nombre" placeholder="p. ej. Nómina BBVA, Cartera" maxlength="60"></div>
+      <div><label for="cuTipo">Tipo</label><select id="cuTipo" name="tipo"></select></div>
+      <div><label for="cuEntidad">Entidad (opcional)</label><input id="cuEntidad" name="entidad" placeholder="p. ej. BBVA"></div>
+      <div><label for="cuSaldo">Saldo inicial (€)</label><input id="cuSaldo" name="saldoInicial" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      <div><label for="cuFecha">Fecha del saldo</label><input id="cuFecha" name="fechaSaldo" type="date"></div>
+      <div><label for="cuIban">Últimos 4 dígitos del IBAN (opcional)</label><input id="cuIban" name="iban" maxlength="42" placeholder="1234 (o pega el IBAN entero)" autocomplete="off"></div>
+      <div><label for="cuIcono">Icono y color (opcional)</label><div class="cat-row"><input id="cuIcono" name="icono" maxlength="4" placeholder="🏦" style="max-width:5em"><input id="cuColor" name="color" type="color" value="#0f766e" style="max-width:4em;padding:2px"></div></div>
+      <div class="full"><label class="check"><input type="checkbox" name="activa" checked> En uso (desmárcala para archivarla: deja de salir al elegir cuenta)</label></div>
+    </div>
+    <p class="muted small" id="cuentaAyuda">Saldo inicial: el dinero que había en la cuenta al empezar el día de la fecha indicada. Lo anterior a esa fecha no cuenta. Para el efectivo, cuenta lo que llevas en la cartera.</p>
+    <p class="neg" id="cuentaError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="cuentaDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Traspaso entre cuentas -->
+<dialog id="traspasoDialog">
+  <form id="traspasoForm" method="dialog" novalidate>
+    <h3 id="traspasoDialogTitle">Traspaso entre cuentas</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div><label for="trOrigen">Desde</label><select id="trOrigen" name="origenId"></select></div>
+      <div><label for="trDestino">Hacia</label><select id="trDestino" name="destinoId"></select></div>
+      <div><label for="trImporte">Importe (€)</label><input id="trImporte" name="importe" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      <div><label for="trFecha">Fecha</label><input id="trFecha" name="fecha" type="date"></div>
+      <div><label for="trComision">Comisión (opcional, €)</label><input id="trComision" name="comision" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      <div><label for="trNota">Nota</label><input id="trNota" name="nota" placeholder="p. ej. Para invertir"></div>
+    </div>
+    <p class="muted small">Un traspaso solo mueve tu dinero de una cuenta a otra: <strong>no es gasto ni ingreso</strong>. La comisión, si la hay, sí se apunta como gasto (categoría «Comisiones») en la cuenta de origen.</p>
+    <p class="neg" id="traspasoError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="traspasoDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Ajustar saldo -->
+<dialog id="ajusteDialog">
+  <form id="ajusteForm" method="dialog" novalidate>
+    <h3 id="ajusteTitulo">Ajustar saldo</h3>
+    <input type="hidden" name="cuentaId"><input type="hidden" name="id">
+    <div class="form-grid">
+      <div><label for="ajFecha">Fecha</label><input id="ajFecha" name="fecha" type="date"></div>
+      <div><label for="ajSaldo">Saldo real ese día (€)</label><input id="ajSaldo" name="saldoReal" inputmode="decimal" placeholder="lo que dice tu banco" autocomplete="off"></div>
+      <div class="full"><label for="ajNota">Nota (opcional)</label><input id="ajNota" name="nota" placeholder="p. ej. Intereses, redondeos, gastos sin apuntar"></div>
+    </div>
+    <p class="small" id="ajPreview"></p>
+    <p class="muted small">Se apunta un <strong>ajuste de saldo</strong> por la diferencia. No cuenta como ingreso ni como gasto. Si sabes qué fue (un gasto que olvidaste), mejor apúntalo como movimiento.</p>
+    <p class="neg" id="ajusteError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="ajusteDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Traspaso entre fondos -->
+<dialog id="tfDialog" class="wide">
+  <form id="tfForm" method="dialog" novalidate>
+    <h3 id="tfTitulo">Traspaso entre fondos</h3>
+    <input type="hidden" name="id">
+    <div class="form-grid">
+      <div><label for="tfFecha">Fecha</label><input id="tfFecha" name="fecha" type="date"></div>
+      <div></div>
+      <div><label for="tfOrigen">Fondo de origen</label><select id="tfOrigen" name="origenId"></select></div>
+      <div><label for="tfDestino">Fondo de destino</label><div class="cat-row"><select id="tfDestino" name="destinoId"></select><button type="button" class="btn-sm" id="tfNuevoFondo">＋ Fondo</button></div></div>
+      <div><label for="tfPart">Participaciones que salen</label><input id="tfPart" name="participaciones" inputmode="decimal" placeholder="p. ej. 120,5" autocomplete="off"><label class="check small"><input type="checkbox" name="todas"> Todas</label></div>
+      <div><label for="tfVlO">Valor liquidativo origen (€)</label><input id="tfVlO" name="vlOrigen" inputmode="decimal" placeholder="opcional" autocomplete="off"></div>
+      <div><label for="tfPartD">Participaciones recibidas</label><input id="tfPartD" name="participacionesDestino" inputmode="decimal" autocomplete="off"></div>
+      <div><label for="tfVlD">Valor liquidativo destino (€)</label><input id="tfVlD" name="vlDestino" inputmode="decimal" placeholder="opcional" autocomplete="off"></div>
+      <div class="full"><label for="tfNotas">Notas</label><input id="tfNotas" name="notas"></div>
+    </div>
+    <p class="small" id="tfPreview"></p>
+    <p class="muted small">Traspaso entre fondos (sin tributar): no hay ganancia ni pérdida y no se mueve dinero de ninguna cuenta. El fondo de destino hereda el coste y las fechas de compra de las participaciones que salen (por orden FIFO), repartidos en proporción.</p>
+    <p class="neg" id="tfError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="tfDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- Asignar cuenta a operaciones -->
+<dialog id="asignarDialog">
+  <form id="asignarForm" method="dialog" novalidate>
+    <h3 id="asignarTitulo">Asignar cuenta a las operaciones</h3>
+    <input type="hidden" name="activoId">
+    <div class="form-grid">
+      <div class="full"><label for="asCuenta">Cuenta</label><select id="asCuenta" name="cuentaId"></select></div>
+      <div><label for="asDesde">Solo desde (opcional)</label><input id="asDesde" name="desde" type="date"></div>
+      <div><label class="check" style="margin-top:22px"><input type="checkbox" name="sobrescribir"> Cambiar también las que ya tienen cuenta</label></div>
+    </div>
+    <p class="small" id="asPreview"></p>
+    <p class="muted small">Las compras restarán de esa cuenta y las ventas sumarán. Consejo: si la cuenta empieza con un saldo inicial en una fecha, asigna solo las operaciones desde esa fecha (las anteriores no afectan al saldo).</p>
+    <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Asignar</button></div>
+  </form>
 </dialog>
 
 <!-- Importar CSV -->
@@ -580,6 +728,7 @@
 <script src="js/storage.js"></script>
 <script src="js/auth.js"></script>
 <script src="js/finance-core.js"></script>
+<script src="js/cuentas-core.js"></script>
 <script src="js/fuel-core.js"></script>
 <script src="js/attachments.js"></script>
 <script src="js/ocr.js"></script>
@@ -587,6 +736,7 @@
 <script src="js/app.js"></script>
 <script src="js/app-extra.js"></script>
 <script src="js/vehiculos.js"></script>
+<script src="js/cuentas.js"></script>
 <script src="js/analysis-export.js"></script>
 <script src="js/main.js"></script>
 </body>

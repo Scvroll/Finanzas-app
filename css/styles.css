@@ -256,3 +256,34 @@ details.metodo ul{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
   #repBody td.actions .btn-sm{display:block;margin:2px 0 2px auto}
   #repBody td,#vehMesesBody td,#vehAniosBody td{padding-left:4px;padding-right:4px}
 }
+
+/* ---------- v3.4: cuentas, traspasos y patrimonio ---------- */
+.tag.traspaso{background:color-mix(in srgb,#3b82f6 14%,transparent);color:#3b82f6}
+.tag.inversion{background:color-mix(in srgb,#8b5cf6 14%,transparent);color:#8b5cf6}
+.tag.ajuste{background:color-mix(in srgb,var(--muted) 16%,transparent);color:var(--muted)}
+.cuentas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-bottom:16px}
+.cuenta-card{margin:0;padding:12px 14px;border-left:5px solid var(--cu-color,var(--primary));display:flex;flex-direction:column;gap:8px}
+.cuenta-card.sel{box-shadow:0 0 0 2px var(--cu-color,var(--primary)),var(--shadow)}
+.cuenta-card.archivada{opacity:.65}
+.cuenta-main{all:unset;cursor:pointer;display:flex;align-items:center;gap:10px;width:100%}
+.cuenta-main:focus-visible{outline:2px solid var(--primary);outline-offset:3px;border-radius:6px}
+.cuenta-ico{font-size:1.6rem;line-height:1}
+.cuenta-txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.cuenta-txt strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cuenta-saldo{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums;text-align:right;display:flex;flex-direction:column}
+.cuenta-saldo small{font-size:.72rem;font-weight:500}
+.cuenta-actions{display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap}
+.cuenta-nueva{cursor:pointer;justify-content:center;align-items:center;color:var(--muted);border-left-style:dashed;min-height:86px;font-weight:600;font:inherit}
+#cdBody tr.futuro{opacity:.6}
+#cuentasMigrar .btn-sm{margin:4px 4px 0 0}
+.patrimonio{display:flex;flex-direction:column}
+.pat-row{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.pat-row.pat-sub{font-weight:600}
+.pat-row.pat-total{border-bottom:0;font-size:1.1rem;font-weight:700;padding-top:10px}
+select.cuenta-sel{width:100%}
+#kpiTraspasos{margin:-6px 0 12px}
+@media (max-width:640px){
+  .cuentas-grid{grid-template-columns:1fr}
+  .cuenta-saldo{font-size:1.15rem}
+  #cdBody td.actions,#traspasosBody td.actions{white-space:normal;width:1%}
+}
