@@ -16,7 +16,7 @@ window.FINANZAS_CONFIG = {
   DRIVE_SCOPE: 'https://www.googleapis.com/auth/drive.appdata',
   // Permiso OPCIONAL, solo si activas «Copia para análisis» en Ajustes: acceso únicamente
   // a los archivos que crea la propia app (carpeta visible «Finanzas App - Análisis»)
-  APP_VERSION: '3.7.0',
+  APP_VERSION: '3.8.0',
   ANALISIS_SCOPE: 'https://www.googleapis.com/auth/drive.file',
   ANALISIS_CARPETA: 'Finanzas App - Análisis',
   ANALISIS_INTERVALO_MS: 60 * 60 * 1000,   // como mucho una actualización automática por hora

@@ -106,6 +106,14 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.8.0 (periodo de nómina, ahorro = traspasos y qué hacer con lo que sobra)
+
+- Sube **todos** los archivos, incluidos los dos nuevos **`js/periodos-core.js`** y **`js/periodos.js`** (en `sw.js`, `VERSION = 'finanzas-v3.8.0'`). No cambia nada en Google Cloud.
+- Si tienes nóminas apuntadas, el Resumen y la Previsión pasan a verse **por periodo de nómina** (de una nómina al día antes de la siguiente). Puedes volver al mes natural con «ver por mes natural» o en Ajustes → «Vista por» (se guarda solo en ese navegador).
+- **Ahorrado** ahora es solo lo que traspasas (neto) de tus cuentas del día a día a tus cuentas de ahorro/inversión. Lo de antes (ingresos − gastos) se llama «Resultado».
+- Datos nuevos: al traspasar lo que sobra se apunta un traspaso normal con la marca `cierrePeriodo`, y la nómina guarda `sobrante` (`pendiente`/`traspasado`/`acumulado`). Un dispositivo con la v3.7 los ve como un traspaso y una nómina normales, pero contaría ese traspaso el día de la nómina y no el día antes. Actualiza todos los dispositivos.
+- Test nuevo (`tests/periodos.test.js`), que no hace falta subir.
+
 ### Actualizar a la v3.7.0 (pestaña Previsión + corrección del saldo de la v3.6.1)
 
 - Sube **todos** los archivos, incluidos los dos nuevos **`js/prevision-core.js`** y **`js/prevision.js`** (en `sw.js`, `VERSION = 'finanzas-v3.7.0'`). No cambia nada en Google Cloud ni en el formato de tus datos: la previsión es un cálculo.

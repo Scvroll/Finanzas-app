@@ -60,7 +60,7 @@ const DEFAULT_CATEGORIAS = {
   gasto: ['Vivienda', 'Supermercado', 'Restaurantes', 'Transporte', 'Combustible', 'Suministros', 'Telefonía e internet', 'Salud', 'Ocio', 'Ropa', 'Electrónica', 'Hogar', 'Educación', 'Suscripciones', 'Viajes', 'Seguros', 'Impuestos', 'Regalos', 'Mascotas', 'Deudas', 'Otros'],
   ingreso: ['Nómina', 'Freelance', 'Intereses', 'Dividendos', 'Alquiler', 'Reembolsos', 'Regalos', 'Otros']
 };
-const AJUSTES_DEFECTO = { tema: 'auto', avisoGarantiaDias: 30, notificaciones: false };
+const AJUSTES_DEFECTO = { tema: 'auto', avisoGarantiaDias: 30, notificaciones: false, vista: 'auto' };   // vista (v3.8): 'auto' | 'mes' | 'nomina' (solo en este dispositivo)
 const nowTs = () => Date.now();
 const emptyState = () => {
   const s = { version: SCHEMA_VERSION };
@@ -105,6 +105,8 @@ const NORMALIZAR = {
       if (m.garantia && num(m.garantia.anios) > 0) mov.garantia = { anios: num(m.garantia.anios), producto: txt(m.garantia.producto), oculta: !!m.garantia.oculta };
     } else {
       mov.tipoIngreso = TIPOS_INGRESO[m.tipoIngreso] ? m.tipoIngreso : tipoIngresoPorDefecto(mov.categoria);
+      // v3.8: qué hiciste con lo que sobró del periodo anterior al entrar esta nómina
+      if (mov.tipoIngreso === 'nomina' && ['pendiente', 'traspasado', 'acumulado'].includes(m.sobrante)) mov.sobrante = m.sobrante;
     }
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
     if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
@@ -182,7 +184,8 @@ const NORMALIZAR = {
   traspasos(t) {
     if (!FC.isISO(t.fecha) || !t.origenId || !t.destinoId || t.origenId === t.destinoId || !(num(t.importe) > 0)) return null;
     return { id: t.id || uid(), fecha: t.fecha, origenId: String(t.origenId), destinoId: String(t.destinoId), importe: round2(num(t.importe)),
-      comision: num(t.comision) > 0 ? round2(num(t.comision)) : 0, nota: txt(t.nota), comisionMovId: t.comisionMovId && num(t.comision) > 0 ? String(t.comisionMovId) : null };
+      comision: num(t.comision) > 0 ? round2(num(t.comision)) : 0, nota: txt(t.nota), comisionMovId: t.comisionMovId && num(t.comision) > 0 ? String(t.comisionMovId) : null,
+      ...(t.cierrePeriodo === true ? { cierrePeriodo: true } : {}) };   // v3.8: lo que sobró del periodo al entrar la nómina
   },
   regularizaciones(r) {
     if (!FC.isISO(r.fecha) || !r.cuentaId || !isFinite(Number(r.importe))) return null;
@@ -299,7 +302,8 @@ const Store = {
   generarRecurrentes(persistir = true) {
     const nuevos = FC.generarRecurrentes(this.state.recurrentes, this.state.movimientos, todayISO());
     if (!nuevos.length) return 0;
-    nuevos.forEach(m => this.state.movimientos.push({ ...NORMALIZAR.movimientos(m), updatedAt: m.updatedAt }));
+    // v3.8: una nómina recurrente nueva queda «pendiente» de decidir qué haces con lo que sobró del periodo anterior
+    nuevos.forEach(m => this.state.movimientos.push({ ...NORMALIZAR.movimientos({ ...m, ...(m.tipo === 'ingreso' && m.tipoIngreso === 'nomina' ? { sobrante: 'pendiente' } : {}) }), updatedAt: m.updatedAt }));
     if (persistir) this.persist();
     return nuevos.length;
   },
@@ -440,7 +444,7 @@ const Calc = {
   resumenMes(movs, ym) {   // ym: 'YYYY-MM' (mes) o 'YYYY' (año)
     const r = { ingresos: 0, gastos: 0, nI: 0, nG: 0, fijos: 0, variables: 0, deuda: 0, interesesDeuda: 0, nomina: 0, extra: 0, otrosIngresos: 0, financiado: 0 };
     for (const m of movs) {
-      if (!String(m.fecha).startsWith(ym)) continue;
+      if (!CuentasCore.enRango(m.fecha, ym)) continue;   // ym: prefijo o rango { desde, hasta } (periodo de nómina, v3.8)
       if (m.tipo === 'ingreso') {
         r.ingresos += m.importe; r.nI++;
         if (m.tipoIngreso === 'nomina') r.nomina += m.importe; else if (m.tipoIngreso === 'extra') r.extra += m.importe; else r.otrosIngresos += m.importe;
@@ -458,7 +462,7 @@ const Calc = {
   },
   gastosPorCategoria(movs, ym) {
     const map = {};
-    for (const m of movs) if (m.tipo === 'gasto' && !m.financiadoPor && String(m.fecha).startsWith(ym)) map[m.categoria] = round2((map[m.categoria] || 0) + m.importe);
+    for (const m of movs) if (m.tipo === 'gasto' && !m.financiadoPor && CuentasCore.enRango(m.fecha, ym)) map[m.categoria] = round2((map[m.categoria] || 0) + m.importe);
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   },
   ultimos12(movs, ym) {
@@ -492,6 +496,15 @@ const Calc = {
   saldoMes(ym) { return CuentasCore.saldoMes(this.datosCuentas(), ym); },
   saldosMensuales(meses) { return CuentasCore.saldosMensuales(this.datosCuentas(), meses); },
   saldoAnio(anio) { return CuentasCore.saldoAnio(this.datosCuentas(), anio); },
+  /** v3.8: saldo de un rango de fechas (periodo de nómina) y de varios a la vez. */
+  saldoRango(desde, hasta) { return CuentasCore.saldoPeriodo(this.datosCuentas(), desde, hasta); },
+  saldosRangos(rangos) { return CuentasCore.saldosRangos(this.datosCuentas(), rangos); },
+  /** v3.8: periodos de nómina (de una nómina al día antes de la siguiente). */
+  periodosNomina(movs = Store.getMovimientos()) {
+    const hoy = todayISO(), inicios = Store.list('cuentas').map(c => c.fechaSaldo).filter(FC.isISO);
+    const primero = [...movs.map(m => m.fecha).filter(FC.isISO), ...inicios].sort()[0] || null;
+    return PeriodosCore.periodos(movs, { hoy, inicio: primero });
+  },
   /** Patrimonio neto = dinero en cuentas + valor de las inversiones − deuda pendiente. */
   patrimonio() {
     const s = this.saldos(), car = this.cartera(), deudas = this.deudas();
@@ -513,14 +526,30 @@ const Calc = {
 /* =========================================================
    UI
    ========================================================= */
-const UI = { mes: monthKey(todayISO()), periodo: (() => { try { return localStorage.getItem('finanzas.periodo') === 'anio' ? 'anio' : 'mes'; } catch { return 'mes'; } })(), charts: {} };
+const UI = { nomPer: null, mes: monthKey(todayISO()), periodo: (() => { try { return localStorage.getItem('finanzas.periodo') === 'anio' ? 'anio' : 'mes'; } catch { return 'mes'; } })(), charts: {} };
 /** Periodo elegido arriba: un mes (por defecto) o un año entero (v3.6). */
+/** v3.8: ¿se ve por periodo de nómina? Ajustes → «Vista por» (auto = por nómina si hay nóminas apuntadas). */
+function vistaNomina(PN = Calc.periodosNomina()) {
+  const v = Store.state.ajustes.vista || 'auto';
+  return v !== 'mes' && PN.hayNominas;
+}
+/** v3.8: periodo de nómina elegido (UI.nomPer = su fecha de inicio; si no, el del mes de arriba). */
+function periodoNominaElegido(PN) {
+  const l = PN.lista;
+  return (UI.nomPer && l.find(p => p.desde === UI.nomPer)) || PeriodosCore.periodoDeMes(l, UI.mes, todayISO());
+}
 function periodo() {
   const anio = UI.mes.slice(0, 4);
   if (UI.periodo === 'anio') return { tipo: 'anio', clave: anio, anio, desde: `${anio}-01-01`, hasta: `${anio}-12-31`, label: anio, nombre: 'año' };
+  const PN = Calc.periodosNomina();
+  if (vistaNomina(PN)) {
+    const p = periodoNominaElegido(PN), i = PN.lista.indexOf(p);
+    return { tipo: 'nomina', clave: { desde: p.desde, hasta: p.hasta }, anio: p.desde.slice(0, 4), desde: p.desde, hasta: p.hasta, label: p.label, nombre: 'periodo',
+      p, anterior: PN.lista[i - 1] || null, siguiente: PN.lista[i + 1] || null, lista: PN.lista };
+  }
   return { tipo: 'mes', clave: UI.mes, anio, desde: `${UI.mes}-01`, hasta: CuentasCore.finDeMes(UI.mes), label: monthLabel(UI.mes), nombre: 'mes' };
 }
-const enPeriodo = fecha => String(fecha || '').startsWith(periodo().clave);
+const enPeriodo = (fecha, P = periodo()) => CuentasCore.enRango(String(fecha || ''), P.clave);
 const PALETTE = ['#0f766e', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#10b981', '#ec4899', '#6366f1', '#84cc16', '#f97316', '#06b6d4', '#a855f7', '#64748b', '#eab308', '#14b8a6', '#e11d48', '#0ea5e9'];
 
 function applyTheme() {
@@ -535,16 +564,50 @@ function cssVar(name) { return getComputedStyle(document.documentElement).getPro
 
 function pintarSelectorPeriodo() {
   const anio = UI.periodo === 'anio', y = Number(UI.mes.slice(0, 4)), hoyY = Number(todayISO().slice(0, 4));
-  $('#monthInput').value = UI.mes; $('#monthInput').hidden = anio;
+  const P = periodo(), nom = P.tipo === 'nomina';
+  $('#monthInput').value = UI.mes; $('#monthInput').hidden = anio || nom;
+  const ns = $('#nominaInput'); ns.hidden = !nom;
+  if (nom) {
+    ns.innerHTML = P.lista.slice().reverse().map(p => `<option value="${p.desde}">${esc(p.label)}${p.abierto ? ' · actual' : ''}</option>`).join('');
+    ns.value = P.desde;
+  }
+  $('label[for=periodoMes]').textContent = nom ? 'Periodo' : 'Mes';
   const ys = Store.getMovimientos().map(m => Number(String(m.fecha).slice(0, 4))).filter(n => n > 1900);
   const desde = Math.min(y, hoyY - 1, ...ys), hasta = Math.max(y, hoyY + 1, ...ys);
   const sel = $('#yearInput'); sel.hidden = !anio;
   sel.innerHTML = Array.from({ length: hasta - desde + 1 }, (_, i) => hasta - i).map(n => `<option value="${n}">${n}</option>`).join(''); sel.value = String(y);
   $('#periodoMes').checked = !anio; $('#periodoAnio').checked = anio;
-  const t = anio ? ['Año anterior', 'Año siguiente'] : ['Mes anterior', 'Mes siguiente'];
+  const t = anio ? ['Año anterior', 'Año siguiente'] : nom ? ['Periodo anterior', 'Periodo siguiente'] : ['Mes anterior', 'Mes siguiente'];
   $('#prevMonth').title = t[0]; $('#prevMonth').setAttribute('aria-label', t[0]); $('#nextMonth').title = t[1]; $('#nextMonth').setAttribute('aria-label', t[1]);
 }
-function setMes(ym) { UI.mes = ym; pintarSelectorPeriodo(); renderAll(); }
+/** v3.8: enlace rápido bajo el título del Resumen para cambiar entre mes natural y periodo de nómina. */
+function pintarVistaLink(P) {
+  const el = $('#vistaLink'); if (!el) return;
+  const hay = Calc.periodosNomina().hayNominas;
+  el.hidden = P.tipo === 'anio' || !hay;
+  if (!el.hidden) el.innerHTML = P.tipo === 'nomina' ? `Por periodo de nómina · <a href="#" data-vista="mes">ver por mes natural</a>` : `Por mes natural · <a href="#" data-vista="nomina">ver por periodo de nómina</a>`;
+}
+function setMes(ym) { UI.mes = ym; UI.nomPer = null; pintarSelectorPeriodo(); renderAll(); }
+/** v3.8: ir a un periodo de nómina (por su fecha de inicio). */
+function setNomina(desde) { UI.nomPer = desde; UI.mes = desde.slice(0, 7); pintarSelectorPeriodo(); renderAll(); }
+/** Botones ‹ › de arriba: mes, año o periodo de nómina. */
+function moverPeriodo(d) {
+  const P = periodo();
+  if (P.tipo === 'nomina') {
+    const p = d < 0 ? P.anterior : P.siguiente;
+    if (p) setNomina(p.desde); else toast(d < 0 ? 'No hay periodos anteriores' : 'Es el último periodo: empieza con la siguiente nómina que apuntes');
+    return;
+  }
+  setMes(addMonths(UI.mes, UI.periodo === 'anio' ? 12 * d : d));
+}
+/** v3.8: cambia «Vista por» (mes natural / periodo de nómina). */
+async function setVista(v) {
+  const P = UI.periodo === 'mes' ? periodo() : null;
+  // del periodo de nómina al mes natural: el actual → el mes de hoy; uno cerrado → el mes de su nómina
+  if (P && P.tipo === 'nomina') UI.mes = P.p.abierto ? monthKey(todayISO()) : P.desde.slice(0, 7);
+  await Store.setAjuste('vista', v === 'mes' || v === 'nomina' ? v : 'auto');
+  UI.nomPer = null; pintarSelectorPeriodo(); renderAll();
+}
 function setPeriodo(tipo) {
   UI.periodo = tipo === 'anio' ? 'anio' : 'mes';
   try { localStorage.setItem('finanzas.periodo', UI.periodo); } catch { /* sin almacenamiento: solo esta sesión */ }
@@ -560,18 +623,25 @@ function showView(v) {
 }
 
 function renderResumen() {
-  const movs = Store.getMovimientos(), P = periodo(), esAnio = P.tipo === 'anio';
+  const movs = Store.getMovimientos(), P = periodo(), esAnio = P.tipo === 'anio', esNom = P.tipo === 'nomina';
   const r = Calc.resumenMes(movs, P.clave);
-  $('#resumenTitle').textContent = (esAnio ? 'Resumen del año ' : 'Resumen de ') + P.label;
-  $('#kpiBalanceLabel').textContent = `Resultado del ${P.nombre} (ingresos − gasto)`;
+  $('#resumenTitle').textContent = esAnio ? 'Resumen del año ' + P.label : esNom ? P.label : 'Resumen de ' + P.label;
+  pintarVistaLink(P);
+  $('#kpiBalanceLabel').textContent = `Resultado del ${P.nombre} (ingresos − gastos)`;
   $('#kpiIngresos').textContent = eur(r.ingresos);
   $('#kpiGastos').textContent = eur(r.gastos);
   $('#kpiIngresosN').textContent = `${r.nI} movimiento${r.nI === 1 ? '' : 's'}`;
   $('#kpiGastosN').textContent = `${r.nG} movimiento${r.nG === 1 ? '' : 's'}`;
   const b = $('#kpiBalance'); b.textContent = eur(r.balance); b.className = 'value ' + (r.balance > 0 ? 'pos' : r.balance < 0 ? 'neg' : '');
-  const prev = Calc.resumenMes(movs, esAnio ? String(Number(P.anio) - 1) : addMonths(UI.mes, -1));
-  $('#kpiBalanceSub').textContent = (esAnio ? 'Año anterior: ' : 'Mes anterior: ') + eur(prev.balance);
-  const a = $('#kpiAhorro'); a.textContent = pct(r.tasaAhorro); a.className = 'value ' + (r.tasaAhorro > 0 ? 'pos' : r.tasaAhorro < 0 ? 'neg' : '');
+  const prevClave = esAnio ? String(Number(P.anio) - 1) : esNom ? (P.anterior ? { desde: P.anterior.desde, hasta: P.anterior.hasta } : null) : addMonths(UI.mes, -1);
+  const prev = prevClave ? Calc.resumenMes(movs, prevClave) : null;
+  $('#kpiBalanceSub').textContent = prev ? (esAnio ? 'Año anterior: ' : esNom ? 'Periodo anterior: ' : 'Mes anterior: ') + eur(prev.balance) : 'Es el primer periodo';
+  const saldo = esAnio ? Calc.saldoAnio(P.anio) : esNom ? Calc.saldoRango(P.desde, P.hasta) : Calc.saldoMes(UI.mes);
+  // v3.8: AHORRO = solo lo que pasas (neto) de tus cuentas del día a día a tus cuentas de ahorro/inversión
+  const ah = PeriodosCore.ahorro(saldo, r.ingresos);
+  const a = $('#kpiAhorro'); a.textContent = eur(ah.ahorrado); a.className = 'value ' + (ah.ahorrado > 0 ? 'pos' : ah.ahorrado < 0 ? 'neg' : '');
+  $('#kpiAhorroSub').textContent = ah.ahorrado < 0 ? `Sacaste de ahorro más de lo que metiste${ah.tasa !== null ? ` · ${pct(ah.tasa)} de los ingresos` : ''}`
+    : `Tasa de ahorro: ${pct(ah.tasa)}${ah.ahorrado ? '' : ` · sin traspasos a ahorro este ${P.nombre}`}`;
   // v3.4: dinero invertido (no es gasto), traspasos (no cuentan) y patrimonio
   const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), P.clave);
   $('#kpiInvertido').textContent = eur(inv.neto);
@@ -579,13 +649,14 @@ function renderResumen() {
   const tp = CuentasCore.traspasosPeriodo(Store.list('traspasos'), P.clave);
   $('#kpiTraspasos').hidden = !tp.n;
   $('#kpiTraspasos').textContent = tp.n ? `⇄ ${tp.n} traspaso${tp.n === 1 ? '' : 's'} entre tus cuentas este ${P.nombre} (${eur(tp.importe)}): no cuentan como gasto ni como ingreso.` : '';
-  const saldo = esAnio ? Calc.saldoAnio(P.anio) : Calc.saldoMes(UI.mes);
   renderSaldoMes(saldo, P);
+  renderSobranteAviso(P);
   renderPatrimonio();
 
   // Desglose: fijos / variables y nómina / extra
   const barra = (partes, total) => total > 0 ? `<div class="stack-bar">${partes.filter(p => p[1] > 0).map(p => `<span class="${p[2]}" style="width:${(p[1] / total * 100).toFixed(2)}%" title="${esc(p[0])}: ${eur(p[1])}"></span>`).join('')}</div>` : '<div class="stack-bar empty-bar"></div>';
   const fila = (lbl, v, total, cls, extra = '') => `<tr><td><span class="dot ${cls}"></span>${lbl}${extra}</td><td class="num">${eur(v)}</td><td class="num muted">${pct(total ? v / total : null)}</td></tr>`;
+  $('#desgloseTitle').textContent = `Desglose del ${P.nombre}`;
   $('#desgloseBody').innerHTML = `
     <div class="desglose">
       <div><h4>Gastos: fijos y variables</h4>${barra([['Fijos', r.fijos, 'c-fijo'], ['Variables', r.variables, 'c-var']], r.gastos)}
@@ -601,7 +672,7 @@ function renderResumen() {
     : `<tr><td colspan="3" class="empty">Sin gastos este ${P.nombre}</td></tr>`;
 
   $('#ultimosTitle').textContent = `Últimos movimientos del ${P.nombre}`;
-  const ult = movs.filter(m => enPeriodo(m.fecha)).sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 6);
+  const ult = movs.filter(m => enPeriodo(m.fecha, P)).sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 6);
   $('#ultimosBody').innerHTML = ult.length ? ult.map(m =>
     `<tr><td>${fmtFecha(m.fecha)}</td><td>${esc(m.descripcion || m.categoria)}<div class="muted" style="font-size:.8rem">${esc(m.categoria)} ${badges(m)}</div></td><td class="num ${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${eur(m.importe)}</td></tr>`).join('')
     : `<tr><td class="empty">No hay movimientos este ${P.nombre}. Pulsa «＋ Movimiento» para añadir uno.</td></tr>`;
@@ -612,15 +683,19 @@ function renderResumen() {
 /** v3.6: «Saldo del mes» (o del año) con arrastre: saldo inicial + resultado ± traspasos = saldo final.
     v3.6.1: con cuentas, el saldo empieza en la fecha de apertura de tus cuentas del día a día; antes, solo resultado. */
 function renderSaldoMes(s, P) {
-  const esAnio = P.tipo === 'anio', hoy = todayISO();
+  const esAnio = P.tipo === 'anio', esNom = P.tipo === 'nomina', hoy = todayISO();
   const inicioTxt = s.inicioCuentas ? fmtFecha(s.inicioCuentas) : '';
-  const finLbl = esAnio ? (P.anio === hoy.slice(0, 4) ? `Saldo final del año (a 31 dic, con lo apuntado hasta hoy)` : `Saldo final a 31 dic ${P.anio}`) : `Saldo final del mes (pasa a ${monthLabel(addMonths(UI.mes, 1))})`;
+  const finLbl = esAnio ? (P.anio === hoy.slice(0, 4) ? `Saldo final del año (a 31 dic, con lo apuntado hasta hoy)` : `Saldo final a 31 dic ${P.anio}`)
+    : esNom ? (P.p.abierto ? `Saldo final del periodo <span class="muted small">(sigue abierto: con lo apuntado hasta ahora; lo que sobre lo decides al entrar la siguiente nómina)</span>` : `Saldo final del periodo <span class="muted small">(lo que sobró al entrar ${P.siguiente ? esc(P.siguiente.nombre.toLowerCase()) : 'la siguiente nómina'})</span>`)
+    : `Saldo final del mes (pasa a ${monthLabel(addMonths(UI.mes, 1))})`;
   const iniLbl = s.empiezaAqui
     ? `Saldo inicial <span class="muted small">(saldo real de tus cuentas el ${inicioTxt})</span>`
-    : esAnio ? `Saldo inicial a 1 ene ${P.anio} <span class="muted small">(lo que sobró del año anterior)</span>` : `Saldo inicial <span class="muted small">(lo que sobró de ${monthLabel(addMonths(UI.mes, -1))})</span>`;
+    : esAnio ? `Saldo inicial a 1 ene ${P.anio} <span class="muted small">(lo que sobró del año anterior)</span>`
+    : esNom ? `Saldo inicial <span class="muted small">(${P.anterior ? 'lo que sobró del periodo anterior' : 'lo que tenías antes'}${P.p.tipo === 'nomina' ? ', antes de cobrar la nómina' : ''})</span>`
+    : `Saldo inicial <span class="muted small">(lo que sobró de ${monthLabel(addMonths(UI.mes, -1))})</span>`;
   const linea = (lbl, v, cls = '', id = '') => `<tr${id ? ` data-saldo="${id}"` : ''} class="${cls}"><td>${lbl}</td><td class="num ${v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : ''}">${v > 0.004 ? '+' : v < -0.004 ? '−' : ''}${eur(Math.abs(v))}</td></tr>`;
   const opc = (lbl, v, id) => Math.abs(v) > 0.004 ? linea(lbl, v, '', id) : '';
-  $('#saldoMesTitle').textContent = esAnio ? `Saldo del año ${P.anio}` : 'Saldo del mes';
+  $('#saldoMesTitle').textContent = esAnio ? `Saldo del año ${P.anio}` : esNom ? 'Saldo del periodo' : 'Saldo del mes';
   $('#saldoMesModo').textContent = s.sinSaldo ? 'Sin saldo' : s.modo === 'cuentas' ? 'Cuentas del día a día' : 'Calculado con tus movimientos';
   const liquidas = Store.list('cuentas').filter(c => CuentasCore.enSaldoMes(c)), fuera = Store.list('cuentas').filter(c => !CuentasCore.enSaldoMes(c));
   const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), P.clave);
@@ -651,7 +726,7 @@ function renderSaldoMes(s, P) {
     ${linea('− Gastos', -s.gastos, '', 'gastos')}
     <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
     ${opc(`Ingresos/gastos anteriores al ${inicioTxt} <span class="muted small">(antes de tus cuentas: no cuentan en el saldo)</span>`, s.previo, 'previo')}
-    ${opc('Traspasado a ahorro/inversión (neto)', s.traspasos, 'traspasos')}
+    ${linea('Ahorrado <span class="muted small">(lo que pasaste a tus cuentas de ahorro/inversión, neto)</span>', s.traspasos, 'saldo-ahorro', 'traspasos')}
     ${opc('Compras/ventas de inversión pagadas desde estas cuentas', s.inversion, 'inversion')}
     ${opc('Ingresos/gastos apuntados en cuentas de ahorro/inversión', s.fuera, 'fuera')}
     ${opc('Ajustes de saldo', s.ajustes, 'ajustes')}
@@ -659,7 +734,7 @@ function renderSaldoMes(s, P) {
     <tr class="saldo-fin"><td><strong>${finLbl}</strong></td><td class="num"><strong data-saldo-val="final">${eur(s.saldoFinal)}</strong></td></tr>
   </tbody></table></div>${tabla}<p class="muted small" id="saldoMesNota">${nota}</p>`;
   }
-  $$('#saldoMesBody [data-ir-mes]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); UI.mes = a.dataset.irMes; setPeriodo('mes'); }));
+  $$('#saldoMesBody [data-ir-mes]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); UI.mes = a.dataset.irMes; UI.nomPer = null; setPeriodo('mes'); }));
 }
 
 function renderCharts(cats, P = periodo()) {
@@ -670,24 +745,35 @@ function renderCharts(cats, P = periodo()) {
 
   // Doughnut
   const emptyEl = $('#chartCategoriasEmpty');
-  emptyEl.style.display = cats.length ? 'none' : 'flex';
+  emptyEl.style.display = cats.length ? 'none' : 'flex'; emptyEl.textContent = `Sin gastos este ${P.nombre}`;
   const dData = { labels: cats.map(c => c[0]), datasets: [{ data: cats.map(c => c[1]), backgroundColor: cats.map((_, i) => PALETTE[i % PALETTE.length]), borderColor: cssVar('--card'), borderWidth: 2 }] };
   if (UI.charts.cat) { UI.charts.cat.data = dData; UI.charts.cat.options.plugins.legend.labels.color = text; UI.charts.cat.update(); }
   else UI.charts.cat = new Chart($('#chartCategorias'), { type: 'doughnut', data: dData, options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { color: text, boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => `${ctx.label}: ${eur(ctx.parsed)}` } } } } });
 
   // Barras 12 meses
   // v3.6: en vista de año, los 12 meses de ese año; si no, los últimos 12 meses. Línea de «Saldo final» (arrastre).
-  const finSerie = P.tipo === 'anio' ? `${P.anio}-12` : UI.mes;
-  const serie = Calc.ultimos12(Store.getMovimientos(), finSerie);
-  const saldosSerie = Calc.saldosMensuales(serie.map(s => s.mes));
-  $('#chartEvolucionTitle').textContent = P.tipo === 'anio' ? `Mes a mes en ${P.anio}` : 'Evolución últimos 12 meses';
+  // v3.8: por periodo de nómina, los últimos 12 periodos. Y una línea con lo ahorrado (traspasado a ahorro/inversión).
+  let serie, saldosSerie, etiquetas;
+  if (P.tipo === 'nomina') {
+    const l = P.lista.slice(0, P.lista.indexOf(P.p) + 1).slice(-12), movs = Store.getMovimientos();
+    serie = l.map(p => ({ mes: p.desde, ...Calc.resumenMes(movs, { desde: p.desde, hasta: p.hasta }) }));
+    saldosSerie = Calc.saldosRangos(l.map(p => ({ desde: p.desde, hasta: p.hasta })));
+    etiquetas = l.map(p => p.tipo === 'previo' ? 'Antes' : `${PeriodosCore.MES3[+p.desde.slice(5, 7) - 1]} ${p.desde.slice(2, 4)}`);
+  } else {
+    const finSerie = P.tipo === 'anio' ? `${P.anio}-12` : UI.mes;
+    serie = Calc.ultimos12(Store.getMovimientos(), finSerie);
+    saldosSerie = Calc.saldosMensuales(serie.map(s => s.mes));
+    etiquetas = serie.map(s => monthLabel(s.mes, true));
+  }
+  $('#chartEvolucionTitle').textContent = P.tipo === 'anio' ? `Mes a mes en ${P.anio}` : P.tipo === 'nomina' ? 'Evolución por periodos de nómina' : 'Evolución últimos 12 meses';
   const eData = {
-    labels: serie.map(s => monthLabel(s.mes, true)),
+    labels: etiquetas,
     datasets: [
       { type: 'bar', label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: cssVar('--ok'), borderRadius: 4 },
       { type: 'bar', label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: cssVar('--danger'), borderRadius: 4 },
       { type: 'line', label: 'Resultado', data: serie.map(s => s.balance), borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 },
-      { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), spanGaps: false, borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 }
+      { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), spanGaps: false, borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 },
+      { type: 'line', label: 'Ahorrado', data: saldosSerie.map(s => PeriodosCore.ahorro(s, 0).ahorrado), borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', tension: .3, pointRadius: 3, hidden: saldosSerie.every(s => !PeriodosCore.ahorro(s, 0).ahorrado) }
     ]
   };
   const eOpts = { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -700,9 +786,9 @@ function renderCharts(cats, P = periodo()) {
 function filtrarMovimientos() {
   const txt = $('#fTexto').value.trim().toLowerCase();
   const per = $('#fPeriodo').value, tipo = $('#fTipo').value, cat = $('#fCategoria').value;
-  const anio = UI.mes.slice(0, 4);
+  const anio = UI.mes.slice(0, 4), P = periodo();
   return Store.getMovimientos().filter(m => {
-    if (per === 'mes' && !enPeriodo(m.fecha)) return false;
+    if (per === 'mes' && !enPeriodo(m.fecha, P)) return false;
     if (per === 'anio' && m.fecha.slice(0, 4) !== anio) return false;
     if (tipo && m.tipo !== tipo) return false;
     if (cat && m.categoria !== cat) return false;
@@ -764,6 +850,9 @@ async function renderAjustes() {
   }
   const aj = Store.state.ajustes;
   $('#ajAvisoDias').value = aj.avisoGarantiaDias;
+  $('#ajVista').value = ['auto', 'mes', 'nomina'].includes(aj.vista) ? aj.vista : 'auto';
+  const PN = Calc.periodosNomina(), vn = vistaNomina(PN);
+  $('#ajVistaInfo').textContent = !PN.hayNominas ? 'Aún no hay nóminas apuntadas (ingresos de tipo «Nómina»): se ve por mes natural.' : `Ahora se ve por ${vn ? 'periodo de nómina' : 'mes natural'} · ${PN.lista.filter(p => p.tipo === 'nomina').length} periodo(s) de nómina.`;
   $('#ajNotif').checked = !!aj.notificaciones && typeof Notification !== 'undefined' && Notification.permission === 'granted';
   $('#ajNotifInfo').textContent = typeof Notification === 'undefined' ? 'Este navegador no admite notificaciones.' : Notification.permission === 'denied' ? 'Has bloqueado las notificaciones para esta web en el navegador.' : '';
   renderAjustesOCR();
@@ -775,6 +864,7 @@ async function renderAjustes() {
 }
 
 function renderAll() {
+  pintarSelectorPeriodo();   // v3.8: los periodos de nómina cambian al apuntar/sincronizar nóminas
   const active = $('section.view.active').id.replace('view-', '');
   if (active === 'resumen') renderResumen();
   if (active === 'prevision') renderPrevision();
@@ -906,7 +996,7 @@ function openMovDialog(mov, preset = {}) {
   fillCategoriaSelect(tipo, mov?.categoria);
   f.descripcion.value = mov?.descripcion || '';
   f.querySelector(`input[name="naturaleza"][value="${mov?.naturaleza || naturalezaPorDefecto(f.categoria.value)}"]`).checked = true;
-  f.tipoIngreso.value = mov?.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
+  $('#mTipoIngreso').value = mov?.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
   $('#cuentasList').innerHTML = [...new Set(Store.getMovimientos().map(m => m.cuenta).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
   prepararCuenta(f.cuenta, mov);
   // pago de deuda
@@ -933,7 +1023,7 @@ $$('#movForm input[name="tipo"]').forEach(r => r.addEventListener('change', () =
 $('#mCategoria').addEventListener('change', e => { // por defecto según la categoría (se puede cambiar)
   const f = $('#movForm');
   if (movTipo() === 'gasto' && !f.id.value) f.querySelector(`input[name="naturaleza"][value="${naturalezaPorDefecto(e.target.value)}"]`).checked = true;
-  if (movTipo() === 'ingreso' && !f.id.value) f.tipoIngreso.value = tipoIngresoPorDefecto(e.target.value);
+  if (movTipo() === 'ingreso' && !f.id.value) $('#mTipoIngreso').value = tipoIngresoPorDefecto(e.target.value);
   if (movTipo() === 'gasto' && !f.esComb.checked && FuelCore.esCategoriaCombustible(e.target.value) && !f.esPago.checked && !f.esFin.checked) { f.esComb.checked = true; syncMovOpciones(); }
 });
 ['esPago', 'esFin', 'esGar', 'esRec'].forEach(n => $('#movForm')[n].addEventListener('change', () => {
@@ -958,7 +1048,7 @@ $('#movForm').addEventListener('submit', async e => {
   const mov = { ...(editando || {}), id: f.id.value || null, tipo, fecha: f.fecha.value, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim() };
   ponerCuenta(mov, f.cuenta, true);
   delete mov.deudaId; delete mov.cuotaN; delete mov.desglose; delete mov.financiadoPor; delete mov.garantia; delete mov.naturaleza; delete mov.tipoIngreso;
-  if (gasto) mov.naturaleza = f.querySelector('input[name="naturaleza"]:checked').value; else mov.tipoIngreso = f.tipoIngreso.value;
+  if (gasto) mov.naturaleza = f.querySelector('input[name="naturaleza"]:checked').value; else mov.tipoIngreso = $('#mTipoIngreso').value;   // v3.8: f.tipoIngreso chocaba con el radio id=tipoIngreso (devolvía «ingreso»)
   const cambios = [];
   // Pago de una cuota de deuda
   if (gasto && f.esPago.checked) {
@@ -1008,9 +1098,17 @@ $('#movForm').addEventListener('submit', async e => {
   }
   cambios.unshift({ col: 'movimientos', rec: mov });
   cambios.push(...AdjUI.cambios(MovDlg.adj, mov.id));
+  // v3.8: nómina nueva que empieza un periodo → se pregunta qué hacer con lo que sobró del anterior
+  let preguntarSobrante = false;
+  if (!editando && mov.tipo === 'ingreso' && mov.tipoIngreso === 'nomina' && typeof Sobrante !== 'undefined') {
+    if (!mov.id) mov.id = uid();
+    preguntarSobrante = Sobrante.preguntar(mov);
+    if (preguntarSobrante) mov.sobrante = 'pendiente';
+  }
   await Store.apply(cambios);
   AdjUI.cerrar(MovDlg.adj, true);
   $('#movDialog').close(); toast(editando ? 'Movimiento actualizado' : 'Movimiento guardado');
+  if (preguntarSobrante) { const info = Sobrante.info(Store.get('movimientos', mov.id)); if (info && info.sobra > 0.004) Sobrante.abrir(info); }
 });
 $('#movDialog').addEventListener('close', () => { if (MovDlg.adj) AdjUI.cerrar(MovDlg.adj, false); });
 $('#movDelete').addEventListener('click', async () => {
@@ -1400,8 +1498,9 @@ $('#resetBtn').addEventListener('click', async () => {
 
 /* ---------- Eventos generales ---------- */
 $$('nav.tabs button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
-$('#prevMonth').addEventListener('click', () => setMes(addMonths(UI.mes, UI.periodo === 'anio' ? -12 : -1)));
-$('#nextMonth').addEventListener('click', () => setMes(addMonths(UI.mes, UI.periodo === 'anio' ? 12 : 1)));
+$('#prevMonth').addEventListener('click', () => moverPeriodo(-1));
+$('#nextMonth').addEventListener('click', () => moverPeriodo(1));
+$('#nominaInput').addEventListener('change', e => { if (FC.isISO(e.target.value)) setNomina(e.target.value); });
 $$('input[name=periodoTipo]').forEach(r => r.addEventListener('change', e => { if (e.target.checked) setPeriodo(e.target.value); }));
 $('#yearInput').addEventListener('change', e => { if (/^\d{4}$/.test(e.target.value)) setMes(`${e.target.value}-${UI.mes.slice(5, 7)}`); });
 $('#monthInput').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setMes(e.target.value); });

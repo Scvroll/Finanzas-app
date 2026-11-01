@@ -44,8 +44,8 @@
     }
     for (const t of vivos(traspasos)) {
       const o = idx.byId.get(t.origenId), d = idx.byId.get(t.destinoId);
-      add(o, { fecha: t.fecha, tipo: 'traspaso-salida', importe: -t.importe, col: 'traspasos', ref: t.id, concepto: `Traspaso a ${d ? d.nombre : '¿cuenta borrada?'}`, otraId: t.destinoId, nota: t.nota || '' });
-      add(d, { fecha: t.fecha, tipo: 'traspaso-entrada', importe: t.importe, col: 'traspasos', ref: t.id, concepto: `Traspaso desde ${o ? o.nombre : '¿cuenta borrada?'}`, otraId: t.origenId, nota: t.nota || '' });
+      add(o, { fecha: t.fecha, tipo: 'traspaso-salida', importe: -t.importe, col: 'traspasos', ref: t.id, concepto: `Traspaso a ${d ? d.nombre : '¿cuenta borrada?'}`, otraId: t.destinoId, nota: t.nota || '', cierre: !!t.cierrePeriodo });
+      add(d, { fecha: t.fecha, tipo: 'traspaso-entrada', importe: t.importe, col: 'traspasos', ref: t.id, concepto: `Traspaso desde ${o ? o.nombre : '¿cuenta borrada?'}`, otraId: t.origenId, nota: t.nota || '', cierre: !!t.cierrePeriodo });
     }
     for (const r of vivos(regularizaciones)) add(idx.byId.get(r.cuentaId), { fecha: r.fecha, tipo: 'ajuste', importe: r.importe, col: 'regularizaciones', ref: r.id, concepto: 'Ajuste de saldo' + (r.nota ? ' · ' + r.nota : ''), saldoReal: r.saldoReal });
     for (const op of vivos(operaciones)) {
@@ -99,18 +99,20 @@
   /** Diferencia a apuntar para que el saldo de la cuenta el día `fecha` sea `saldoReal`. */
   function diferenciaAjuste(cuenta, fl, fecha, saldoReal) { return round2(saldoReal - saldoEn(cuenta, fl, fecha)); }
 
-  /** Dinero invertido en un periodo (prefijo de fecha: 'YYYY-MM' o 'YYYY'): compras con comisiones − ventas netas. */
+  /** ¿La fecha está en el periodo? Periodo = prefijo ('YYYY-MM' o 'YYYY') o rango { desde, hasta } (v3.8). */
+  const enRango = (fecha, p) => typeof p === 'string' ? String(fecha).startsWith(p) : !!p && String(fecha) >= p.desde && String(fecha) <= p.hasta;
+  /** Dinero invertido en un periodo (prefijo de fecha o rango): compras con comisiones − ventas netas. */
   function invertidoPeriodo(operaciones, prefijo) {
     let compras = 0, ventas = 0, n = 0;
     for (const o of vivos(operaciones)) {
-      if (!String(o.fecha).startsWith(prefijo)) continue;
+      if (!enRango(o.fecha, prefijo)) continue;
       const bruto = Number(o.participaciones) * Number(o.precio), com = Number(o.comisiones) || 0; n++;
       if (o.tipo === 'venta') ventas += bruto - com; else compras += bruto + com;
     }
     return { compras: round2(compras), ventas: round2(ventas), neto: round2(compras - ventas), n };
   }
   function traspasosPeriodo(traspasos, prefijo) {
-    const l = vivos(traspasos).filter(t => String(t.fecha).startsWith(prefijo));
+    const l = vivos(traspasos).filter(t => enRango(t.fecha, prefijo));
     return { n: l.length, importe: round2(l.reduce((s, t) => s + t.importe, 0)) };
   }
   /** Nombres de cuenta escritos a mano que no corresponden a ninguna cuenta creada (con cuántos registros los usan). */
@@ -157,6 +159,7 @@
   const enSaldoPorDefecto = tipo => EN_SALDO_POR_TIPO[tipo] !== false;
   const enSaldoMes = c => !!c && (typeof c.enSaldoMes === 'boolean' ? c.enSaldoMes : enSaldoPorDefecto(c.tipo));
   const finDeMes = ym => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; };
+  const diaAntes = iso => { const d = new Date(Date.UTC(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10)) - 86400000); return d.toISOString().slice(0, 10); };
   const cent = n => Math.round((Number(n) || 0) * 100 + (Number(n) >= 0 ? 1e-7 : -1e-7));
   const COMPONENTES = ['ingresos', 'gastos', 'previo', 'fuera', 'traspasos', 'inversion', 'ajustes', 'apertura', 'inicial'];
 
@@ -181,7 +184,8 @@
     }
     const K = { 'traspaso-entrada': 'traspasos', 'traspaso-salida': 'traspasos', compra: 'inversion', venta: 'inversion', ajuste: 'ajustes' };
     if (conCuentas) {
-      for (const f of flujos(datos)) if (liq.has(f.cuentaId) && K[f.tipo] && f.fecha >= inicio) push(f.fecha, K[f.tipo], cent(f.importe));
+      // v3.8: un traspaso «de cierre» (lo que sobró al entrar la nómina) cuenta el día antes: en el periodo que se cierra
+      for (const f of flujos(datos)) { const fe = f.cierre ? diaAntes(f.fecha) : f.fecha; if (liq.has(f.cuentaId) && K[f.tipo] && fe >= inicio) push(fe, K[f.tipo], cent(f.importe)); }
       for (const cu of liquidas) {
         const fs = cu.fechaSaldo || '0000-00-00', ini = cent(cu.saldoInicial);
         if (fs === inicio) ev.push({ fecha: fs, k: 'inicial', c: ini });
@@ -216,6 +220,8 @@
     const E = eventosSaldoMes(datos);
     return meses.map(ym => ({ mes: ym, ...saldoPeriodoEv(E, `${ym}-01`, finDeMes(ym)) }));
   }
+  /** v3.8: saldo de varios rangos { desde, hasta } (periodos de nómina) de una vez. */
+  function saldosRangos(datos, rangos) { const E = eventosSaldoMes(datos); return rangos.map(r => ({ ...r, ...saldoPeriodoEv(E, r.desde, r.hasta) })); }
   const saldoMes = (datos, ym) => saldosMensuales(datos, [ym])[0];
   /** Saldo del año (YYYY) con arrastre del año anterior y su detalle mes a mes. */
   function saldoAnio(datos, anio) {
@@ -230,8 +236,8 @@
     return E.eventos.reduce((s, e) => e.fecha <= fecha ? s + e.c : s, 0) / 100;
   }
 
-  const api = { TIPOS_CUENTA, ICONO_TIPO, normNombre, indice, resolver, flujos, historial, saldoEn, saldos, serieMensual, diferenciaAjuste, invertidoPeriodo, traspasosPeriodo, nombresSinCuenta, usos,
-    EN_SALDO_POR_TIPO, enSaldoPorDefecto, enSaldoMes, eventosSaldoMes, saldosMensuales, saldoMes, saldoPeriodo, saldoAnio, saldoDisponibleEn, finDeMes };
+  const api = { TIPOS_CUENTA, ICONO_TIPO, normNombre, indice, resolver, flujos, historial, saldoEn, saldos, serieMensual, diferenciaAjuste, invertidoPeriodo, traspasosPeriodo, enRango, nombresSinCuenta, usos,
+    EN_SALDO_POR_TIPO, enSaldoPorDefecto, enSaldoMes, eventosSaldoMes, saldosMensuales, saldosRangos, saldoMes, saldoPeriodo, saldoAnio, saldoDisponibleEn, finDeMes };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CuentasCore = api;
 })(typeof self !== 'undefined' ? self : globalThis);

@@ -12,8 +12,31 @@ function calcPrevision() {
   const v = prevLS(PREV_KEY_VAR);
   const esLiquido = m => { if (!hayCuentas) return true; const c = cuentaDeRegistro(m); return !c || CuentasCore.enSaldoMes(c); };
   const P = PrevisionCore.prevision({ hoy, saldoHoy: saldo === null ? 0 : saldo, movimientos: Store.getMovimientos(), recurrentes: Store.list('recurrentes'), deudas: Store.list('deudas'),
-    meses: Number(prevLS(PREV_KEY_MESES)) || 7, gastoVariable: v === null || v === '' ? null : Number(v), esLiquido });
+    meses: Number(prevLS(PREV_KEY_MESES)) || 7, gastoVariable: v === null || v === '' ? null : Number(v), esLiquido, porNomina: vistaNomina() });
   return { ...P, saldoHoy: saldo === null ? 0 : saldo, saldoNulo: saldo === null, hayCuentas };
+}
+
+const prevItems = (m, vacio) => m.items.length ? m.items.map(it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ' <span class="badge b-var">Estimada</span>' : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`).join('')
+  : `<tr><td colspan="3" class="empty">${vacio}</td></tr>`;
+/** v3.8: tarjeta de un periodo de nómina (de la nómina al día antes de la siguiente). */
+function tarjetaPeriodo(m, i) {
+  const ok = m.sobra >= 0, s = m.seAcaba;
+  const fila = (lbl, v, signo, cls = '') => `<tr class="${cls}"><td>${lbl}</td><td class="num ${signo === '+' ? 'pos' : signo === '−' && v ? 'neg' : ''}">${signo && v ? signo : ''}${eur(v)}</td></tr>`;
+  return `<div class="card prev-mes ${ok && !s ? 'ok' : 'mal'}" data-prev-mes="${m.clave}">
+    <div class="card-head"><h3 style="margin:0">${esc(m.nombre)} <span class="muted small">(${esc(m.rango)})${m.actual ? ' · periodo actual, desde hoy' : ''}</span></h3>
+      <span class="prev-estado ${ok ? 'ok' : 'mal'}" data-prev-estado>${ok ? `Sobrarán ${eur(m.sobra)}` : `⚠ Faltarán ${eur(m.falta)}`}</span></div>
+    ${s ? `<p class="prev-aviso prev-acaba" data-prev-aviso>⚠ <strong>El dinero se acaba hacia el ${fmtFecha(s.fecha)}</strong>, antes de la nómina del ${fmtFecha(s.nomina)}: tu saldo podría bajar a <strong>${eur(s.minimo)}</strong>${s.fechaMinimo !== s.fecha ? ` (el ${fmtFecha(s.fechaMinimo)})` : ''}.${m.arrastra ? ` Empiezas el periodo con ${eur(m.arrastra)} del anterior.` : ''} <span class="muted small">Contando el gasto variable repartido por igual cada día.</span></p>` : ''}
+    <table class="prev-resumen"><tbody>
+      ${fila(m.actual ? 'Saldo de hoy' : 'Saldo inicial (lo que sobra del periodo anterior)', m.saldoInicial, '', 'prev-ini')}
+      ${fila('Nómina e ingresos previstos' + (m.nominaEstimada ? ' (nómina estimada)' : ''), m.ingresos, '+')}
+      ${fila('Gastos fijos', m.fijos, '−')}
+      ${fila('Cuotas de deudas', m.cuotas, '−')}
+      ${fila(m.actual ? `Gasto variable que falta (${eur(m.variableYaGastado)} ya gastado)` : 'Gasto variable estimado', m.variable, '−')}
+      <tr class="total"><td>${ok ? `Sobrante previsto al llegar la nómina del ${fmtFecha(m.siguienteNomina)}` : `Falta previsto al llegar la nómina del ${fmtFecha(m.siguienteNomina)}`}</td><td class="num ${ok ? 'pos' : 'neg'}" data-prev-sobra>${eur(m.sobra)}</td></tr>
+    </tbody></table>
+    <details ${i === 0 ? 'open' : ''}><summary>Detalle: ${m.items.length} movimiento${m.items.length === 1 ? '' : 's'} previsto${m.items.length === 1 ? '' : 's'}</summary>
+      <div class="table-wrap"><table class="prev-items"><tbody>${prevItems(m, 'Nada previsto en este periodo.')}</tbody></table></div></details>
+  </div>`;
 }
 
 function renderPrevision() {
@@ -21,14 +44,21 @@ function renderPrevision() {
   $('#prevSaldoHoy').textContent = eur(P.saldoHoy);
   $('#prevSaldoHoyNota').textContent = P.saldoNulo ? 'Tus cuentas empiezan más adelante: se parte de 0 €.' : P.hayCuentas ? `a ${fmtFecha(P.hoy)} · como el «Saldo del mes»` : `a ${fmtFecha(P.hoy)} · sin cuentas creadas: lo acumulado de ingresos − gastos`;
   $('#prevMeses').value = String(P.meses.length);
+  // v3.8: por periodos de nómina (de nómina a nómina) si la vista es «Periodo de nómina»
+  const nom = P.modo === 'nomina', ud = nom ? 'periodo' : 'mes';
+  $('#prevMesesLbl').textContent = nom ? 'Periodos' : 'Meses';
+  $('#prevMeses').options[0].textContent = nom ? 'Este periodo + 6' : 'Este mes + 6'; $('#prevMeses').options[1].textContent = nom ? 'Este periodo + 12' : 'Este mes + 12';
+  $('#prevVariableLbl').textContent = `Gasto variable estimado (€ / ${ud})`;
+  $('#prevChartTitle').textContent = nom ? 'Lo que sobra al llegar cada nómina' : 'Saldo previsto a fin de cada mes';
   const vGuardado = prevLS(PREV_KEY_VAR), inp = $('#prevVariable');
   if (document.activeElement !== inp) inp.value = vGuardado === null || vGuardado === '' ? '' : fmtInput(Number(vGuardado));
   inp.placeholder = fmtInput(P.gastoVariableAuto.importe) + ' (media)';
   $('#prevVariableAuto').hidden = vGuardado === null || vGuardado === '';
   const a = P.gastoVariableAuto;
   $('#prevVariableNota').textContent = (vGuardado === null || vGuardado === ''
-    ? (a.meses.length ? `Gasto variable: ${eur(a.importe)} al mes, la media de ${a.meses.map(m => monthLabel(m)).join(', ')} (gastos marcados como «variable»).` : 'Aún no hay meses completos con gastos variables: se cuenta 0 €. Escribe una estimación si quieres.')
-    : `Gasto variable: ${eur(P.gastoVariable)} al mes (lo has escrito tú; la media sería ${eur(a.importe)}).`) + ' En el mes actual solo se resta lo que falta por gastar.';
+    ? (a.meses.length ? `Gasto variable: ${eur(a.importe)} al ${ud}, la media de ${a.meses.map(m => monthLabel(m)).join(', ')} (gastos marcados como «variable»).` : 'Aún no hay meses completos con gastos variables: se cuenta 0 €. Escribe una estimación si quieres.')
+    : `Gasto variable: ${eur(P.gastoVariable)} al ${ud} (lo has escrito tú; la media sería ${eur(a.importe)}).`) + ` En el ${ud} actual solo se resta lo que falta por gastar.`
+    + (nom ? ' Cada periodo empieza el día que esperas la nómina e incluye los gastos fijos, las cuotas y el gasto variable hasta la siguiente.' : '');
   // Nómina estimada
   const nb = $('#prevNomina'), ne = P.nominaEstimada;
   nb.hidden = !ne;
@@ -36,6 +66,7 @@ function renderPrevision() {
 
   $('#prevMesesList').innerHTML = P.meses.map((m, i) => {
     const ok = m.sobra >= 0, aviso = m.avisoAntesDeCobrar || m.avisoDentroMes;
+    if (nom) return tarjetaPeriodo(m, i);
     const fila = (lbl, v, signo, cls = '') => `<tr class="${cls}"><td>${lbl}</td><td class="num ${signo === '+' ? 'pos' : signo === '−' && v ? 'neg' : ''}">${signo && v ? signo : ''}${eur(v)}</td></tr>`;
     const items = m.items.length ? m.items.map(it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ' <span class="badge b-var">Estimada</span>' : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`).join('')
       : '<tr><td colspan="3" class="empty">Nada previsto este mes.</td></tr>';
@@ -63,9 +94,9 @@ function renderPrevision() {
   if (typeof Chart === 'undefined') return;
   const okC = cssVar('--ok') || '#16a34a', badC = cssVar('--danger') || '#dc2626', grid = cssVar('--border'), muted = cssVar('--muted'), text = cssVar('--text');
   UI.charts.prev = new Chart($('#chartPrevision'), {
-    data: { labels: P.meses.map(m => monthLabel(m.mes, true)), datasets: [
-      { type: 'bar', label: 'Saldo a fin de mes', data: P.meses.map(m => m.sobra), backgroundColor: P.meses.map(m => (m.sobra >= 0 ? okC : badC) + 'cc'), borderRadius: 4, order: 2 },
-      { type: 'line', label: 'Mínimo dentro del mes', data: P.meses.map(m => m.minimo), borderColor: cssVar('--warn') || '#d97706', backgroundColor: 'transparent', borderDash: [5, 4], pointRadius: 3, tension: .2, order: 1 }] },
+    data: { labels: P.meses.map(m => nom ? `${PeriodosCore.MES3[+m.desde.slice(5, 7) - 1]} ${m.desde.slice(2, 4)}` : monthLabel(m.mes, true)), datasets: [
+      { type: 'bar', label: nom ? 'Sobrante al llegar la nómina' : 'Saldo a fin de mes', data: P.meses.map(m => m.sobra), backgroundColor: P.meses.map(m => (m.sobra >= 0 ? okC : badC) + 'cc'), borderRadius: 4, order: 2 },
+      { type: 'line', label: nom ? 'Mínimo dentro del periodo' : 'Mínimo dentro del mes', data: P.meses.map(m => m.minimo), borderColor: cssVar('--warn') || '#d97706', backgroundColor: 'transparent', borderDash: [5, 4], pointRadius: 3, tension: .2, order: 1 }] },
     options: { maintainAspectRatio: false, animation: false, plugins: { legend: { position: 'bottom', labels: { color: text, boxWidth: 12 } }, tooltip: { callbacks: { label: x => `${x.dataset.label}: ${eur(x.parsed.y)}` } } },
       scales: { x: { grid: { color: grid }, ticks: { color: muted } }, y: { grid: { color: c => c.tick.value === 0 ? muted : grid }, ticks: { color: muted, callback: v => eur(v) } } } }
   });

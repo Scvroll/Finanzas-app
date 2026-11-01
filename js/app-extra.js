@@ -201,7 +201,7 @@ document.addEventListener('click', e => {
     const nom = q('ocrTipo').value === 'nomina', imp = parseImporte(q('ocrImporte').value || ''), fecha = q('ocrFecha').value, quien = q('ocrQuien').value.trim();
     const tipo = nom ? 'ingreso' : 'gasto';
     if (movTipo() !== tipo) { f.querySelector(`input[name="tipo"][value="${tipo}"]`).checked = true; fillCategoriaSelect(tipo); }
-    if (nom) { fillCategoriaSelect('ingreso', Store.getCategorias('ingreso').includes('Nómina') ? 'Nómina' : undefined); f.tipoIngreso.value = 'nomina'; }
+    if (nom) { fillCategoriaSelect('ingreso', Store.getCategorias('ingreso').includes('Nómina') ? 'Nómina' : undefined); $('#mTipoIngreso').value = 'nomina'; }
     if (isFinite(imp) && imp > 0) f.importe.value = fmtInput(imp);
     if (FC.isISO(fecha)) f.fecha.value = fecha;
     if (quien) f.descripcion.value = nom ? `Nómina ${quien}` : quien;
