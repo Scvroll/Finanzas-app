@@ -24,6 +24,7 @@
       <button class="icon-btn" id="prevMonth" title="Mes anterior" aria-label="Mes anterior">‹</button>
       <input type="month" id="monthInput" style="width:auto" aria-label="Mes">
       <select id="yearInput" aria-label="Año" hidden></select>
+      <select id="nominaInput" aria-label="Periodo de nómina" hidden></select>
       <button class="icon-btn" id="nextMonth" title="Mes siguiente" aria-label="Mes siguiente">›</button>
     </div>
     <button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">🌓</button>
@@ -68,18 +69,20 @@
   <div class="notice warn" id="garantiaBanner" role="status" hidden></div>
   <!-- RESUMEN -->
   <section class="view active" id="view-resumen">
-    <h2 id="resumenTitle" style="margin:4px 0 12px"></h2>
+    <h2 id="resumenTitle" style="margin:4px 0 4px"></h2>
+    <p class="muted small vista-link" id="vistaLink" hidden></p>
+    <div class="notice warn sobrante-aviso" id="sobranteAviso" role="status" hidden></div>
     <div class="grid kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="label">Ingresos</div><div class="value pos" id="kpiIngresos">0 €</div><div class="sub" id="kpiIngresosN"></div></div>
       <div class="kpi"><div class="label">Gasto real</div><div class="value neg" id="kpiGastos">0 €</div><div class="sub" id="kpiGastosN"></div></div>
-      <div class="kpi"><div class="label" id="kpiBalanceLabel">Resultado del mes (ingresos − gasto)</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
-      <div class="kpi"><div class="label">Tasa de ahorro</div><div class="value" id="kpiAhorro">—</div><div class="sub">Ahorro / ingresos</div></div>
+      <div class="kpi"><div class="label" id="kpiBalanceLabel">Resultado del mes (ingresos − gastos)</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
+      <div class="kpi" title="Ahorro = lo que pasas (neto) de tus cuentas del día a día a tus cuentas de ahorro o inversión. Tasa de ahorro = ahorrado / ingresos."><div class="label">Ahorrado</div><div class="value" id="kpiAhorro">0 €</div><div class="sub" id="kpiAhorroSub">Tasa de ahorro: —</div></div>
       <div class="kpi"><div class="label">Invertido (neto)</div><div class="value" id="kpiInvertido">0 €</div><div class="sub" id="kpiInvertidoSub">Compras − ventas del mes</div></div>
     </div>
     <p class="muted small" id="kpiTraspasos" style="margin:-8px 0 12px" hidden></p>
     <div class="card" id="saldoMesCard"><div class="card-head"><h3 style="margin:0" id="saldoMesTitle">Saldo del mes</h3><span class="muted small" id="saldoMesModo"></span></div><div id="saldoMesBody"></div></div>
     <div class="card" id="patrimonioCard" hidden><div class="card-head"><h3 style="margin:0">Patrimonio (hoy)</h3><button class="btn-sm" data-ir-cuentas>Ver cuentas</button></div><div id="patrimonioBody"></div></div>
-    <div class="card"><h3>Desglose del mes</h3><div id="desgloseBody"></div></div>
+    <div class="card"><h3 id="desgloseTitle">Desglose del mes</h3><div id="desgloseBody"></div></div>
     <div class="grid charts">
       <div class="card"><h3>Gastos por categoría</h3><div class="chart-box"><canvas id="chartCategorias"></canvas><div class="empty" id="chartCategoriasEmpty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center">Sin gastos este mes</div></div></div>
       <div class="card"><h3 id="chartEvolucionTitle">Evolución últimos 12 meses</h3><div class="chart-box"><canvas id="chartEvolucion"></canvas></div></div>
@@ -102,14 +105,14 @@
     <div class="card" id="prevControles">
       <div class="prev-controles">
         <div class="prev-saldo"><span class="muted small">Saldo de hoy (cuentas del día a día)</span><strong id="prevSaldoHoy"></strong><span class="muted small" id="prevSaldoHoyNota"></span></div>
-        <label>Meses<select id="prevMeses"><option value="7">Este mes + 6</option><option value="13">Este mes + 12</option></select></label>
-        <label>Gasto variable estimado (€ / mes)<input id="prevVariable" inputmode="decimal" autocomplete="off"></label>
+        <label><span id="prevMesesLbl">Meses</span><select id="prevMeses"><option value="7">Este mes + 6</option><option value="13">Este mes + 12</option></select></label>
+        <label><span id="prevVariableLbl">Gasto variable estimado (€ / mes)</span><input id="prevVariable" inputmode="decimal" autocomplete="off"></label>
         <button class="btn-sm" id="prevVariableAuto" type="button">Usar la media</button>
       </div>
       <p class="muted small" id="prevVariableNota" style="margin-bottom:0"></p>
       <div class="notice warn" id="prevNomina" hidden></div>
     </div>
-    <div class="card"><h3 style="margin-top:0">Saldo previsto a fin de cada mes</h3><div class="chart-box" style="height:240px"><canvas id="chartPrevision"></canvas></div></div>
+    <div class="card"><h3 style="margin-top:0" id="prevChartTitle">Saldo previsto a fin de cada mes</h3><div class="chart-box" style="height:240px"><canvas id="chartPrevision"></canvas></div></div>
     <div id="prevMesesList"></div>
     <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. En el mes actual solo cuenta lo que aún está pendiente. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
   </section>
@@ -317,6 +320,15 @@
       </div>
     </div>
     <div class="card" id="accountCard"></div>
+    <div class="card" id="vistaCard">
+      <h3>Vista por</h3>
+      <div class="form-grid">
+        <div><label for="ajVista">Ver el Resumen y la Previsión por</label>
+          <select id="ajVista"><option value="auto">Automático (periodo de nómina si hay nóminas)</option><option value="nomina">Periodo de nómina</option><option value="mes">Mes natural</option></select></div>
+      </div>
+      <p class="muted small" style="margin-bottom:0">Un <strong>periodo de nómina</strong> va desde el día que cobras la nómina hasta el día antes de la siguiente: la nómina de octubre paga lo que gastas hasta que llega la de noviembre (incluidos los pagos de final de mes). El <strong>ahorro</strong> es solo lo que pasas de tus cuentas del día a día a tus cuentas de ahorro o inversión. Se guarda solo en este dispositivo.</p>
+      <p class="muted small" id="ajVistaInfo" style="margin-bottom:0"></p>
+    </div>
     <div class="two-col">
       <div class="card">
         <h3>Avisos de garantía</h3>
@@ -656,6 +668,28 @@
   </form>
 </dialog>
 
+<!-- v3.8: lo que sobró al entrar una nómina -->
+<dialog id="sobranteDialog">
+  <form id="sobranteForm" method="dialog" novalidate>
+    <h3 id="sobranteTitulo">Ha entrado la nómina</h3>
+    <input type="hidden" name="movId">
+    <p id="sobranteTexto"></p>
+    <div class="seg sobrante-opciones" role="radiogroup" aria-label="Qué hacer con lo que sobró">
+      <input type="radio" name="accion" id="sobTraspasar" value="traspasar"><label for="sobTraspasar">Traspasar a ahorro</label>
+      <input type="radio" name="accion" id="sobAcumular" value="acumular"><label for="sobAcumular">Acumular al nuevo periodo</label>
+      <input type="radio" name="accion" id="sobLuego" value="luego"><label for="sobLuego">Decidir más tarde</label>
+    </div>
+    <div class="form-grid" id="sobranteTraspaso">
+      <div><label for="sobDestino">A la cuenta</label><select id="sobDestino" name="destinoId"></select></div>
+      <div><label for="sobOrigen">Desde</label><select id="sobOrigen" name="origenId"></select></div>
+      <div><label for="sobImporte">Importe (€)</label><input id="sobImporte" name="importe" inputmode="decimal" autocomplete="off"></div>
+    </div>
+    <p class="muted small" id="sobranteAyuda"></p>
+    <p class="neg" id="sobranteError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions"><button type="button" data-close id="sobranteCancelar">Cerrar</button><button type="submit" class="btn-primary" id="sobranteOk">Guardar</button></div>
+  </form>
+</dialog>
+
 <!-- Ajustar saldo -->
 <dialog id="ajusteDialog">
   <form id="ajusteForm" method="dialog" novalidate>
@@ -753,6 +787,7 @@
 <script src="js/finance-core.js"></script>
 <script src="js/cuentas-core.js"></script>
 <script src="js/prevision-core.js"></script>
+<script src="js/periodos-core.js"></script>
 <script src="js/fuel-core.js"></script>
 <script src="js/attachments.js"></script>
 <script src="js/ocr.js"></script>
@@ -762,6 +797,7 @@
 <script src="js/vehiculos.js"></script>
 <script src="js/cuentas.js"></script>
 <script src="js/prevision.js"></script>
+<script src="js/periodos.js"></script>
 <script src="js/analysis-export.js"></script>
 <script src="js/main.js"></script>
 </body>

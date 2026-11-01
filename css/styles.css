@@ -339,3 +339,15 @@ select.cuenta-sel{width:100%}
 .prev-items td.nowrap{white-space:nowrap;color:var(--muted)}
 .prev-item.vencida td{background:color-mix(in srgb,var(--warn) 8%,transparent)}
 @media (max-width:600px){.prev-mes .card-head{flex-wrap:wrap;gap:6px}.prev-estado{font-size:.9rem}.prev-controles input,.prev-controles select{min-width:0;width:100%}.prev-controles label{flex:1 1 140px}}
+/* v3.8: periodo de nómina, ahorro y lo que sobra */
+.vista-link{margin:0 0 12px}
+.vista-link a{color:var(--primary)}
+#nominaInput{width:auto;max-width:min(330px,52vw)}
+.sobrante-aviso{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between;margin-bottom:12px}
+.sobrante-opciones{display:flex;flex-wrap:wrap;margin:6px 0 12px;width:100%}
+.sobrante-opciones label{flex:1 1 auto;text-align:center}
+.sobrante-opciones input:disabled + label{opacity:.45;cursor:not-allowed}
+#sobranteDialog{max-width:560px}
+.saldo-mes .saldo-ahorro td:first-child{font-weight:600}
+.prev-aviso.prev-acaba{background:color-mix(in srgb,var(--danger) 12%,var(--card));border-color:color-mix(in srgb,var(--danger) 50%,var(--border));color:var(--text)}
+@media (max-width:600px){#nominaInput{max-width:46vw;font-size:.85rem}.sobrante-opciones label{flex:1 1 100%}}
