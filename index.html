@@ -49,6 +49,7 @@
   </div>
   <nav class="tabs" role="tablist">
     <button data-view="resumen" class="active">Resumen</button>
+    <button data-view="prevision">Previsión</button>
     <button data-view="movimientos">Movimientos</button>
     <button data-view="cuentas">Cuentas</button>
     <button data-view="deudas">Deudas</button>
@@ -93,6 +94,24 @@
         <div class="table-wrap"><table><tbody id="ultimosBody"></tbody></table></div>
       </div>
     </div>
+  </section>
+
+  <!-- PREVISIÓN (v3.7) -->
+  <section class="view" id="view-prevision">
+    <div class="card-head" style="margin-bottom:12px"><h2 style="margin:0">Previsión: ¿cuánto me sobrará?</h2></div>
+    <div class="card" id="prevControles">
+      <div class="prev-controles">
+        <div class="prev-saldo"><span class="muted small">Saldo de hoy (cuentas del día a día)</span><strong id="prevSaldoHoy"></strong><span class="muted small" id="prevSaldoHoyNota"></span></div>
+        <label>Meses<select id="prevMeses"><option value="7">Este mes + 6</option><option value="13">Este mes + 12</option></select></label>
+        <label>Gasto variable estimado (€ / mes)<input id="prevVariable" inputmode="decimal" autocomplete="off"></label>
+        <button class="btn-sm" id="prevVariableAuto" type="button">Usar la media</button>
+      </div>
+      <p class="muted small" id="prevVariableNota" style="margin-bottom:0"></p>
+      <div class="notice warn" id="prevNomina" hidden></div>
+    </div>
+    <div class="card"><h3 style="margin-top:0">Saldo previsto a fin de cada mes</h3><div class="chart-box" style="height:240px"><canvas id="chartPrevision"></canvas></div></div>
+    <div id="prevMesesList"></div>
+    <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. En el mes actual solo cuenta lo que aún está pendiente. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
   </section>
 
   <!-- MOVIMIENTOS -->
@@ -733,6 +752,7 @@
 <script src="js/auth.js"></script>
 <script src="js/finance-core.js"></script>
 <script src="js/cuentas-core.js"></script>
+<script src="js/prevision-core.js"></script>
 <script src="js/fuel-core.js"></script>
 <script src="js/attachments.js"></script>
 <script src="js/ocr.js"></script>
@@ -741,6 +761,7 @@
 <script src="js/app-extra.js"></script>
 <script src="js/vehiculos.js"></script>
 <script src="js/cuentas.js"></script>
+<script src="js/prevision.js"></script>
 <script src="js/analysis-export.js"></script>
 <script src="js/main.js"></script>
 </body>

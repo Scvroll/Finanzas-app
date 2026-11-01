@@ -140,71 +140,75 @@
   /* ---------- v3.6: saldo del mes con arrastre (calculado, sin apuntes ficticios) ----------
      Cuentas «del día a día» (cuentan en el saldo del mes): por defecto corriente, efectivo y otra;
      las de ahorro e inversión no (se puede cambiar por cuenta con `enSaldoMes`).
-     Saldo final de un mes = saldo inicial (saldo final del mes anterior)
-       + ingresos − gastos (resultado del mes, todos los movimientos menos las compras financiadas)
-       − ingresos/gastos apuntados en cuentas que no cuentan (ahorro/inversión)
-       ± traspasos de/hacia cuentas que no cuentan  ± compras/ventas de inversión pagadas desde cuentas que cuentan
-       ± ajustes de saldo de esas cuentas  + apertura de cuentas.
-     Apertura: el día de la fecha del saldo inicial de cada cuenta que cuenta, su saldo inicial real sustituye
-     a lo calculado antes con sus movimientos; y en la primera fecha de saldo (inicio de las cuentas)
-     también se descuenta lo acumulado con movimientos sin cuenta y compras de inversión sin cuenta.
-     Sin cuentas que cuenten: arrastre acumulado de ingresos − gastos (− inversión neta sin cuenta) desde el primer mes. */
+     v3.6.1 — Con cuentas del día a día, el saldo EMPIEZA el día de la primera fecha de saldo inicial de esas
+     cuentas (`inicio`):
+       · Saldo inicial del periodo que contiene `inicio` = saldos iniciales reales de las cuentas abiertas ese día.
+       · Lo anterior a `inicio` no cuenta en el saldo (sí en «Resultado»): los periodos que terminan antes
+         de `inicio` no tienen saldo (sinSaldo: true, saldoInicial/saldoFinal = null).
+       · Las compras/ventas de inversión SIN cuenta nunca mueven el saldo (las que tienen cuenta del día a día,
+         desde la fecha de saldo de esa cuenta, sí).
+       · Cuentas del día a día abiertas después de `inicio`: su saldo inicial entra como «Apertura de cuentas»
+         (descontando lo que ya se había contado con sus movimientos anteriores a su fecha de saldo).
+     Saldo final = saldo inicial + ingresos − gastos − (lo de antes de `inicio`) − lo apuntado en cuentas de ahorro/inversión
+       ± traspasos con cuentas de ahorro/inversión ± inversión pagada desde estas cuentas ± ajustes + apertura.
+     Sin cuentas del día a día: ingresos − gastos acumulados desde el primer movimiento (sin inversiones).
+     Todo se suma en céntimos (enteros) para no arrastrar descuadres de redondeo. */
   const EN_SALDO_POR_TIPO = { corriente: true, efectivo: true, otra: true, ahorro: false, inversion: false };
   const enSaldoPorDefecto = tipo => EN_SALDO_POR_TIPO[tipo] !== false;
   const enSaldoMes = c => !!c && (typeof c.enSaldoMes === 'boolean' ? c.enSaldoMes : enSaldoPorDefecto(c.tipo));
   const finDeMes = ym => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`; };
-  const COMPONENTES = ['resultado', 'ingresos', 'gastos', 'fuera', 'traspasos', 'inversion', 'ajustes', 'apertura'];
+  const cent = n => Math.round((Number(n) || 0) * 100 + (Number(n) >= 0 ? 1e-7 : -1e-7));
+  const COMPONENTES = ['ingresos', 'gastos', 'previo', 'fuera', 'traspasos', 'inversion', 'ajustes', 'apertura', 'inicial'];
 
-  /** Apuntes que mueven el saldo del mes: { fecha, k (componente), importe }. */
+  /** Apuntes del saldo del mes: { fecha, k (componente), c (importe en céntimos) }. */
   function eventosSaldoMes(datos) {
     const cuentas = vivos(datos.cuentas), idx = indice(cuentas), ev = [];
     const liquidas = cuentas.filter(enSaldoMes), liq = new Set(liquidas.map(c => c.id));
     const conCuentas = liquidas.length > 0;
     const inicio = conCuentas ? liquidas.map(c => c.fechaSaldo || '0000-00-00').sort()[0] : null;
-    const previos = new Map(); let sinCuentaAntes = 0, nSinCuenta = 0, primera = null;
-    const marca = f => { if (!primera || f < primera) primera = f; };
-    const push = (fecha, k, importe) => { if (fecha && importe) ev.push({ fecha, k, importe: round2(importe) }); };
+    const previos = new Map(); let nSinCuenta = 0, primera = null;
+    const push = (fecha, k, c) => { if (fecha && c) ev.push({ fecha, k, c }); };
     for (const m of vivos(datos.movimientos)) {
       if (m.financiadoPor || !m.fecha) continue;
-      const imp = round2(m.tipo === 'ingreso' ? m.importe : -m.importe); marca(m.fecha);
-      push(m.fecha, m.tipo === 'ingreso' ? 'ingresos' : 'gastos', imp);
-      const c = resolver(m, idx);
-      if (c && !liq.has(c.id)) push(m.fecha, 'fuera', -imp);
-      else if (c) { if (m.fecha < (c.fechaSaldo || '0000-00-00')) previos.set(c.id, (previos.get(c.id) || 0) + imp); }
-      else if (conCuentas && m.fecha < inicio) sinCuentaAntes += imp;
+      const c = cent(m.importe) * (m.tipo === 'ingreso' ? 1 : -1);
+      if (!primera || m.fecha < primera) primera = m.fecha;
+      push(m.fecha, m.tipo === 'ingreso' ? 'ingresos' : 'gastos', c);
+      if (conCuentas && m.fecha < inicio) { push(m.fecha, 'previo', -c); continue; }   // antes de tus cuentas: no cuenta
+      const cu = resolver(m, idx);
+      if (cu && !liq.has(cu.id)) push(m.fecha, 'fuera', -c);
+      else if (cu) { if (m.fecha < (cu.fechaSaldo || '0000-00-00')) previos.set(cu.id, (previos.get(cu.id) || 0) + c); }
       else if (conCuentas) nSinCuenta++;
     }
-    for (const op of vivos(datos.operaciones)) {
-      if (!op.fecha) continue;
-      const bruto = Number(op.participaciones) * Number(op.precio), com = Number(op.comisiones) || 0;
-      const imp = op.tipo === 'venta' ? bruto - com : -(bruto + com);
-      const c = op.cuentaId ? idx.byId.get(op.cuentaId) : null;
-      marca(op.fecha);
-      if (c) continue;   // con cuenta: va en los flujos de esa cuenta (si cuenta en el saldo)
-      push(op.fecha, 'inversion', imp);
-      if (conCuentas && op.fecha < inicio) sinCuentaAntes += imp;
-    }
     const K = { 'traspaso-entrada': 'traspasos', 'traspaso-salida': 'traspasos', compra: 'inversion', venta: 'inversion', ajuste: 'ajustes' };
-    for (const f of flujos(datos)) if (liq.has(f.cuentaId) && K[f.tipo]) push(f.fecha, K[f.tipo], f.importe);
-    for (const c of liquidas) push(c.fechaSaldo || '0000-00-00', 'apertura', round2((Number(c.saldoInicial) || 0) - (previos.get(c.id) || 0)));
-    if (conCuentas && sinCuentaAntes) push(inicio, 'apertura', -sinCuentaAntes);
+    if (conCuentas) {
+      for (const f of flujos(datos)) if (liq.has(f.cuentaId) && K[f.tipo] && f.fecha >= inicio) push(f.fecha, K[f.tipo], cent(f.importe));
+      for (const cu of liquidas) {
+        const fs = cu.fechaSaldo || '0000-00-00', ini = cent(cu.saldoInicial);
+        if (fs === inicio) ev.push({ fecha: fs, k: 'inicial', c: ini });
+        else push(fs, 'apertura', ini - (previos.get(cu.id) || 0));
+      }
+    }
     ev.sort((a, b) => a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0);
     return { eventos: ev, conCuentas, inicio, primera, sinCuentaDespues: nSinCuenta, liquidas, noLiquidas: cuentas.filter(c => !liq.has(c.id)) };
   }
   /** Saldo de un periodo [desde, hasta] (fechas ISO) con arrastre: saldo inicial = todo lo anterior a `desde`. */
   function saldoPeriodoEv(E, desde, hasta) {
-    const r = { desde, hasta, saldoInicial: 0 };
-    for (const k of COMPONENTES) r[k] = 0;
+    const t = { antes: 0 }; for (const k of COMPONENTES) t[k] = 0;
     for (const e of E.eventos) {
-      if (e.fecha < desde) r.saldoInicial += e.importe;
-      else if (e.fecha <= hasta) r[e.k] += e.importe;
+      if (e.fecha < desde) t.antes += e.c;
+      else if (e.fecha <= hasta) t[e.k] += e.c;
     }
-    r.resultado = r.ingresos + r.gastos;
-    r.ingresos = round2(r.ingresos); r.gastos = round2(-r.gastos);
-    for (const k of ['saldoInicial', 'resultado', 'fuera', 'traspasos', 'inversion', 'ajustes', 'apertura']) r[k] = round2(r[k]);
-    r.saldoFinal = round2(r.saldoInicial + r.resultado + r.fuera + r.traspasos + r.inversion + r.ajustes + r.apertura);
-    r.modo = E.conCuentas ? 'cuentas' : 'movimientos'; r.primerMes = E.primera ? E.primera.slice(0, 7) : null; r.inicioCuentas = E.inicio; r.sinCuentaDespues = E.sinCuentaDespues;
-    return r;
+    const sinSaldo = !!(E.conCuentas && hasta < E.inicio);
+    const resultado = t.ingresos + t.gastos;
+    const ini = t.antes + t.inicial;   // el saldo inicial real de las cuentas abiertas en `inicio` es el arranque
+    const fin = ini + resultado + t.previo + t.fuera + t.traspasos + t.inversion + t.ajustes + t.apertura;
+    const e = c => c / 100;
+    return { desde, hasta, sinSaldo,
+      saldoInicial: sinSaldo ? null : e(ini), ingresos: e(t.ingresos), gastos: e(-t.gastos), resultado: e(resultado),
+      previo: e(t.previo), fuera: e(t.fuera), traspasos: e(t.traspasos), inversion: e(t.inversion), ajustes: e(t.ajustes), apertura: e(t.apertura),
+      saldoFinal: sinSaldo ? null : e(fin),
+      empiezaAqui: !!(E.conCuentas && E.inicio >= desde && E.inicio <= hasta),
+      modo: E.conCuentas ? 'cuentas' : 'movimientos', primerMes: E.primera ? E.primera.slice(0, 7) : null, inicioCuentas: E.inicio, sinCuentaDespues: E.sinCuentaDespues };
   }
   const saldoPeriodo = (datos, desde, hasta) => saldoPeriodoEv(eventosSaldoMes(datos), desde, hasta);
   /** Saldo del mes con arrastre para cada mes de `meses` (YYYY-MM). */
@@ -219,8 +223,12 @@
     const meses = Array.from({ length: 12 }, (_, i) => `${y}-${String(i + 1).padStart(2, '0')}`);
     return { anio: y, ...saldoPeriodoEv(E, `${y}-01-01`, `${y}-12-31`), meses: meses.map(ym => ({ mes: ym, ...saldoPeriodoEv(E, `${ym}-01`, finDeMes(ym)) })) };
   }
-  /** Saldo (calculado como el del mes) al terminar el día `fecha`. */
-  const saldoDisponibleEn = (datos, fecha) => round2(eventosSaldoMes(datos).eventos.reduce((s, e) => e.fecha <= fecha ? s + e.importe : s, 0));
+  /** Saldo (calculado como el del mes) al terminar el día `fecha` (null si es antes del inicio de tus cuentas). */
+  function saldoDisponibleEn(datos, fecha) {
+    const E = eventosSaldoMes(datos);
+    if (E.conCuentas && fecha < E.inicio) return null;
+    return E.eventos.reduce((s, e) => e.fecha <= fecha ? s + e.c : s, 0) / 100;
+  }
 
   const api = { TIPOS_CUENTA, ICONO_TIPO, normNombre, indice, resolver, flujos, historial, saldoEn, saldos, serieMensual, diferenciaAjuste, invertidoPeriodo, traspasosPeriodo, nombresSinCuenta, usos,
     EN_SALDO_POR_TIPO, enSaldoPorDefecto, enSaldoMes, eventosSaldoMes, saldosMensuales, saldoMes, saldoPeriodo, saldoAnio, saldoDisponibleEn, finDeMes };

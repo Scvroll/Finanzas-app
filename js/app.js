@@ -609,39 +609,56 @@ function renderResumen() {
   renderCharts(cats, P);
 }
 
-/** v3.6: «Saldo del mes» (o del año) con arrastre: saldo inicial + resultado ± traspasos = saldo final. */
+/** v3.6: «Saldo del mes» (o del año) con arrastre: saldo inicial + resultado ± traspasos = saldo final.
+    v3.6.1: con cuentas, el saldo empieza en la fecha de apertura de tus cuentas del día a día; antes, solo resultado. */
 function renderSaldoMes(s, P) {
   const esAnio = P.tipo === 'anio', hoy = todayISO();
+  const inicioTxt = s.inicioCuentas ? fmtFecha(s.inicioCuentas) : '';
   const finLbl = esAnio ? (P.anio === hoy.slice(0, 4) ? `Saldo final del año (a 31 dic, con lo apuntado hasta hoy)` : `Saldo final a 31 dic ${P.anio}`) : `Saldo final del mes (pasa a ${monthLabel(addMonths(UI.mes, 1))})`;
-  const iniLbl = esAnio ? `Saldo inicial a 1 ene ${P.anio} <span class="muted small">(lo que sobró del año anterior)</span>` : `Saldo inicial <span class="muted small">(lo que sobró de ${monthLabel(addMonths(UI.mes, -1))})</span>`;
+  const iniLbl = s.empiezaAqui
+    ? `Saldo inicial <span class="muted small">(saldo real de tus cuentas el ${inicioTxt})</span>`
+    : esAnio ? `Saldo inicial a 1 ene ${P.anio} <span class="muted small">(lo que sobró del año anterior)</span>` : `Saldo inicial <span class="muted small">(lo que sobró de ${monthLabel(addMonths(UI.mes, -1))})</span>`;
   const linea = (lbl, v, cls = '', id = '') => `<tr${id ? ` data-saldo="${id}"` : ''} class="${cls}"><td>${lbl}</td><td class="num ${v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : ''}">${v > 0.004 ? '+' : v < -0.004 ? '−' : ''}${eur(Math.abs(v))}</td></tr>`;
   const opc = (lbl, v, id) => Math.abs(v) > 0.004 ? linea(lbl, v, '', id) : '';
   $('#saldoMesTitle').textContent = esAnio ? `Saldo del año ${P.anio}` : 'Saldo del mes';
-  $('#saldoMesModo').textContent = s.modo === 'cuentas' ? 'Cuentas del día a día' : 'Calculado con tus movimientos';
+  $('#saldoMesModo').textContent = s.sinSaldo ? 'Sin saldo' : s.modo === 'cuentas' ? 'Cuentas del día a día' : 'Calculado con tus movimientos';
   const liquidas = Store.list('cuentas').filter(c => CuentasCore.enSaldoMes(c)), fuera = Store.list('cuentas').filter(c => !CuentasCore.enSaldoMes(c));
-  const nota = s.modo === 'cuentas'
-    ? `Cuentan: ${liquidas.map(c => esc(c.nombre)).join(', ') || 'ninguna'}${fuera.length ? `. Aparte (ahorro/inversión): ${fuera.map(c => esc(c.nombre)).join(', ')}` : ''}. Lo que pasas entre cuentas del día a día no cambia el saldo; lo que pasas a ahorro/inversión sale de él. Lo puedes cambiar en cada cuenta (Cuentas → ✏️).`
+  const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), P.clave);
+  const invTxt = inv.n ? ` Este ${P.nombre} invertiste ${eur(inv.neto)} (${inv.n} operación${inv.n === 1 ? '' : 'es'}): lo ves en Inversiones, no cambia este saldo.` : '';
+  let nota = s.modo === 'cuentas'
+    ? `El saldo empieza el ${inicioTxt}, con el saldo real de tus cuentas del día a día. Cuentan: ${liquidas.map(c => esc(c.nombre)).join(', ') || 'ninguna'}${fuera.length ? `. Aparte (ahorro/inversión): ${fuera.map(c => esc(c.nombre)).join(', ')}` : ''}. Lo que pasas entre cuentas del día a día no cambia el saldo; lo que pasas a ahorro/inversión sale de él. Las compras de inversión sin cuenta no lo tocan. Lo puedes cambiar en cada cuenta (Cuentas → ✏️).`
       + (s.sinCuentaDespues ? ` Tienes ${s.sinCuentaDespues} movimiento(s) sin cuenta: también cuentan aquí, así que este saldo puede no cuadrar con el de tus cuentas hasta que se la pongas.` : '')
-    : `Calculado con tus ingresos y gastos acumulados desde ${s.primerMes ? monthLabel(s.primerMes) : 'tu primer movimiento'}, sin crear movimientos: si cambias un mes pasado, se recalcula solo. Si añades tus cuentas (pestaña Cuentas) con su saldo, se usará el saldo real.`;
+    : `Calculado con tus ingresos y gastos acumulados desde ${s.primerMes ? monthLabel(s.primerMes) : 'tu primer movimiento'}, sin crear movimientos: si cambias un mes pasado, se recalcula solo. Las compras de inversión no lo tocan. Si añades tus cuentas (pestaña Cuentas) con su saldo, se usará el saldo real.`;
   let tabla = '';
   if (esAnio) {
-    const filas = s.meses.filter(m => m.mes <= monthKey(hoy) || Math.abs(m.resultado) > 0.004 || Math.abs(m.saldoFinal - m.saldoInicial) > 0.004);
+    const filas = s.meses.filter(m => m.mes <= monthKey(hoy) || Math.abs(m.resultado) > 0.004 || (!m.sinSaldo && Math.abs(m.saldoFinal - m.saldoInicial) > 0.004));
+    const val = v => v === null ? '<span class="muted">—</span>' : eur(v);
     tabla = `<details class="saldo-anual" open><summary>Mes a mes</summary><div class="table-wrap"><table class="small-table" id="saldoAnualTabla"><thead><tr><th>Mes</th><th class="num">Inicial</th><th class="num">Ingresos</th><th class="num">Gastos</th><th class="num" title="Traspasos a ahorro/inversión, compras/ventas de inversión, ajustes y apertura de cuentas">Otros*</th><th class="num">Final</th></tr></thead><tbody>${filas.map(m => {
-      const otros = round2(m.saldoFinal - m.saldoInicial - m.resultado);
-      return `<tr><td><a href="#" data-ir-mes="${m.mes}">${monthLabel(m.mes, true)}</a></td><td class="num">${eur(m.saldoInicial)}</td><td class="num pos">${eur(m.ingresos)}</td><td class="num neg">${eur(m.gastos)}</td><td class="num">${Math.abs(otros) > 0.004 ? eur(otros) : '—'}</td><td class="num"><strong>${eur(m.saldoFinal)}</strong></td></tr>`; }).join('')}</tbody></table></div><p class="muted small">* Otros: traspasos a ahorro/inversión, compras/ventas de inversión, ajustes y apertura de cuentas. Pulsa un mes para verlo.</p></details>`;
+      const otros = m.sinSaldo ? 0 : round2(m.saldoFinal - m.saldoInicial - m.resultado);
+      return `<tr${m.sinSaldo ? ' class="sin-saldo"' : ''}><td><a href="#" data-ir-mes="${m.mes}">${monthLabel(m.mes, true)}</a></td><td class="num">${val(m.saldoInicial)}</td><td class="num pos">${eur(m.ingresos)}</td><td class="num neg">${eur(m.gastos)}</td><td class="num">${Math.abs(otros) > 0.004 ? eur(otros) : '—'}</td><td class="num"><strong>${val(m.saldoFinal)}</strong></td></tr>`; }).join('')}</tbody></table></div><p class="muted small">* Otros: traspasos a ahorro/inversión, compras/ventas de inversión pagadas desde estas cuentas, ajustes, apertura de cuentas y lo anterior al inicio de tus cuentas.${s.meses.some(m => m.sinSaldo) ? ` «—»: sin saldo (antes del ${inicioTxt}).` : ''} Pulsa un mes para verlo.</p></details>`;
   }
-  $('#saldoMesBody').innerHTML = `<div class="table-wrap"><table class="saldo-mes" id="saldoMesTabla"><tbody>
+  if (s.sinSaldo) {
+    $('#saldoMesBody').innerHTML = `<div class="table-wrap"><table class="saldo-mes" id="saldoMesTabla"><tbody>
+    ${linea('+ Ingresos', s.ingresos, '', 'ingresos')}
+    ${linea('− Gastos', -s.gastos, '', 'gastos')}
+    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
+  </tbody></table></div><p class="saldo-vacio" id="saldoMesSinSaldo">Sin saldo: tus cuentas empiezan el ${inicioTxt}.</p>${tabla}<p class="muted small" id="saldoMesNota">${invTxt ? invTxt.trim() + ' ' : ''}El saldo del ${P.nombre} (lo que sobra y pasa al siguiente) se calcula desde el ${inicioTxt}, cuando empiezan tus cuentas del día a día; antes no hay saldo que arrastrar. Si quieres verlo antes, cambia en Cuentas la fecha y el saldo inicial de tu cuenta a esa fecha.</p>`;
+  } else {
+    nota = (invTxt ? invTxt.trim() + ' ' : '') + nota;
+    $('#saldoMesBody').innerHTML = `<div class="table-wrap"><table class="saldo-mes" id="saldoMesTabla"><tbody>
     ${linea(iniLbl, s.saldoInicial, 'saldo-ini', 'inicial')}
     ${linea('+ Ingresos', s.ingresos, '', 'ingresos')}
     ${linea('− Gastos', -s.gastos, '', 'gastos')}
     <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
+    ${opc(`Ingresos/gastos anteriores al ${inicioTxt} <span class="muted small">(antes de tus cuentas: no cuentan en el saldo)</span>`, s.previo, 'previo')}
     ${opc('Traspasado a ahorro/inversión (neto)', s.traspasos, 'traspasos')}
     ${opc('Compras/ventas de inversión pagadas desde estas cuentas', s.inversion, 'inversion')}
     ${opc('Ingresos/gastos apuntados en cuentas de ahorro/inversión', s.fuera, 'fuera')}
     ${opc('Ajustes de saldo', s.ajustes, 'ajustes')}
-    ${opc('Apertura de cuentas <span class="muted small">(se toma el saldo real que pusiste en tus cuentas)</span>', s.apertura, 'apertura')}
+    ${opc('Apertura de cuentas <span class="muted small">(saldo inicial de las cuentas que empiezan más tarde)</span>', s.apertura, 'apertura')}
     <tr class="saldo-fin"><td><strong>${finLbl}</strong></td><td class="num"><strong data-saldo-val="final">${eur(s.saldoFinal)}</strong></td></tr>
   </tbody></table></div>${tabla}<p class="muted small" id="saldoMesNota">${nota}</p>`;
+  }
   $$('#saldoMesBody [data-ir-mes]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); UI.mes = a.dataset.irMes; setPeriodo('mes'); }));
 }
 
@@ -670,7 +687,7 @@ function renderCharts(cats, P = periodo()) {
       { type: 'bar', label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: cssVar('--ok'), borderRadius: 4 },
       { type: 'bar', label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: cssVar('--danger'), borderRadius: 4 },
       { type: 'line', label: 'Resultado', data: serie.map(s => s.balance), borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 },
-      { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 }
+      { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), spanGaps: false, borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 }
     ]
   };
   const eOpts = { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -760,6 +777,7 @@ async function renderAjustes() {
 function renderAll() {
   const active = $('section.view.active').id.replace('view-', '');
   if (active === 'resumen') renderResumen();
+  if (active === 'prevision') renderPrevision();
   if (active === 'movimientos') renderMovimientos();
   if (active === 'deudas') renderDeudas();
   if (active === 'inversiones') renderInversiones();

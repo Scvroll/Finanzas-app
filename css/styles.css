@@ -309,3 +309,33 @@ select.cuenta-sel{width:100%}
 @media (max-width:600px){.small-table th,.small-table td{padding:5px 3px}.seg-xs label{padding:5px 7px}}
 #saldoAnualTabla a{color:var(--primary);text-decoration:none;font-weight:600;white-space:nowrap}
 @media (max-width:600px){#saldoAnualTabla th:nth-child(2),#saldoAnualTabla td:nth-child(2){display:none}}
+
+/* v3.6.1: periodo sin saldo (antes de abrir las cuentas) */
+.saldo-vacio { margin: .6rem 0; padding: .55rem .75rem; border-radius: 8px; background: var(--bg, rgba(0,0,0,.04)); border: 1px dashed var(--border); font-weight: 600; }
+#saldoAnualTabla tr.sin-saldo td { color: var(--muted); }
+#saldoAnualTabla tr.sin-saldo td a { color: var(--muted); }
+
+/* ---------- Previsión (v3.7) ---------- */
+.prev-controles{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-end}
+.prev-controles label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+.prev-controles input,.prev-controles select{min-width:150px}
+.prev-saldo{display:flex;flex-direction:column;gap:2px;margin-right:auto}
+.prev-saldo strong{font-size:1.5rem}
+#prevNomina{margin:12px 0 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+#prevNomina[hidden]{display:none}
+.prev-mes{border-left:5px solid var(--ok)}
+.prev-mes.mal{border-left-color:var(--danger)}
+.prev-estado{font-weight:700;padding:6px 12px;border-radius:999px;white-space:nowrap}
+.prev-estado.ok{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.prev-estado.mal{background:color-mix(in srgb,var(--danger) 15%,transparent);color:var(--danger)}
+.prev-aviso{margin:10px 0;padding:8px 12px;border-radius:10px;background:color-mix(in srgb,var(--warn) 12%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 45%,var(--border))}
+.prev-resumen{width:100%;margin-top:8px}
+.prev-resumen td{padding:5px 4px;border-bottom:1px solid var(--border)}
+.prev-resumen tr.total td{font-weight:700;border-bottom:0;font-size:1.05rem}
+.prev-mes details{margin-top:8px}
+.prev-mes summary{cursor:pointer;color:var(--primary);font-size:.9rem}
+.prev-items{width:100%}
+.prev-items td{padding:5px 4px;border-bottom:1px solid var(--border);vertical-align:top}
+.prev-items td.nowrap{white-space:nowrap;color:var(--muted)}
+.prev-item.vencida td{background:color-mix(in srgb,var(--warn) 8%,transparent)}
+@media (max-width:600px){.prev-mes .card-head{flex-wrap:wrap;gap:6px}.prev-estado{font-size:.9rem}.prev-controles input,.prev-controles select{min-width:0;width:100%}.prev-controles label{flex:1 1 140px}}
