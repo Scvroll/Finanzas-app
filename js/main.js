@@ -5,7 +5,7 @@ Store.onChange(() => { renderAll(); renderSync(); });
   catch (e) { console.warn('Datos corruptos en localStorage; se empieza vacío', e); Store.state = emptyState(); }
   Auth.init();
   Sync.setup();
-  applyTheme(); $('#monthInput').value = UI.mes;
+  applyTheme(); pintarSelectorPeriodo();
   const vista = location.hash.slice(1);
   showView($('#view-' + vista) ? vista : 'resumen');
   renderSync();

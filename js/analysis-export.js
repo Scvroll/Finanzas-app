@@ -61,11 +61,16 @@
     const vacioMes = k => ({ mes: k, ingresos: 0, gastos: 0, gastosFijos: 0, gastosVariables: 0, nomina: 0, ingresosExtra: 0, otrosIngresos: 0, cuotasDeuda: 0, interesesDeuda: 0, compraFinanciada: 0 });
     for (const op of ops) { const k = ym(op.fecha); meses[k] = meses[k] || vacioMes(k); }
     for (const t of traspasosArr) { const k = ym(t.fecha); meses[k] = meses[k] || vacioMes(k); }
+    const listaMeses = Object.keys(meses).sort();
+    const saldosMes = new Map(CC.saldosMensuales({ cuentas: cuentasArr, movimientos: movs, traspasos: traspasosArr, regularizaciones: regsArr, operaciones: ops, activos: [] }, listaMeses).map(x => [x.mes, x]));
     const resumenMensual = Object.values(meses).sort((a, b) => a.mes.localeCompare(b.mes)).map(r => {
       for (const k of Object.keys(r)) if (k !== 'mes') r[k] = r2(r[k]);
       const inv = CC.invertidoPeriodo(ops, r.mes), tp = CC.traspasosPeriodo(traspasosArr, r.mes);
       Object.assign(r, { comprasInversion: inv.compras, ventasInversion: inv.ventas, dineroInvertidoNeto: inv.neto, traspasosEntreCuentas: tp.n, importeTraspasado: tp.importe });
       r.ahorro = r2(r.ingresos - r.gastos); r.tasaAhorro = r.ingresos > 0 ? Math.round((r.ahorro / r.ingresos) * 10000) / 10000 : null;
+      // v3.6: saldo del mes con arrastre (saldoInicial = saldoFinal del mes anterior)
+      const sm = saldosMes.get(r.mes);
+      if (sm) Object.assign(r, { saldoInicial: sm.saldoInicial, traspasadoAhorroInversion: sm.traspasos, inversionDesdeCuentasDelDia: sm.inversion, movimientosEnCuentasAhorro: sm.fuera, ajustesSaldo: sm.ajustes, aperturaCuentas: sm.apertura, saldoFinal: sm.saldoFinal });
       return r;
     });
     const gastosPorCategoria = {};
@@ -142,7 +147,7 @@
     const cuentas = sal.lista.map(x => {
       const c = x.cuenta, fl = sal.flujos.filter(f => f.cuentaId === c.id);
       const desde = fl.length ? ym(fl[0].fecha) : ym(hoy);
-      return { id: c.id, nombre: c.nombre, tipo: c.tipo, entidad: c.entidad || '', ibanUltimos4: c.iban || '', activa: c.activa !== false, saldoInicial: r2(c.saldoInicial), fechaSaldoInicial: c.fechaSaldo,
+      return { id: c.id, nombre: c.nombre, tipo: c.tipo, entidad: c.entidad || '', ibanUltimos4: c.iban || '', activa: c.activa !== false, cuentaDelDiaADia: CC.enSaldoMes(c), saldoInicial: r2(c.saldoInicial), fechaSaldoInicial: c.fechaSaldo,
         saldoHoy: x.saldo, saldoConApuntesFuturos: x.saldoFinal, ingresos: x.ingresos, gastos: x.gastos, traspasosEntrada: x.traspasosEntrada, traspasosSalida: x.traspasosSalida,
         comprasInversion: x.compras, ventasInversion: x.ventas, ajustes: x.ajustes, apuntes: x.n, saldoFinDeMes: CC.serieMensual(c, sal.flujos, desde, ym(hoy)) };
     });
@@ -158,7 +163,7 @@
 
     const json = {
       app: 'Finanzas App', formato: 'finanzas-analisis', version: 1, appVersion: version, generadoEn: ahora, fechaReferencia: hoy, moneda: 'EUR',
-      leeme: 'Copia de solo lectura generada por la app para que el usuario o su asistente puedan analizar sus finanzas. Se sobrescribe en cada actualización: los cambios hechos aquí se pierden. Importes en euros (punto decimal). Gastos en positivo. Las compras financiadas (financiadoPor) no cuentan como gasto del mes: cuentan sus cuotas (movimientos con deudaId). Los traspasos entre cuentas, los ajustes de saldo y las compras/ventas de inversión NO son gastos ni ingresos (solo mueven saldos); la comisión de un traspaso sí es un gasto (comisionDeTraspasoId). Saldo de cuenta = saldo inicial + ingresos − gastos ± traspasos − compras + ventas ± ajustes, desde la fecha del saldo inicial. En los traspasos entre fondos el destino hereda coste y fechas FIFO (sin ganancia). Ganancias de inversiones calculadas por FIFO (método obligatorio en España para valores homogéneos); precios introducidos a mano por el usuario.',
+      leeme: 'Copia de solo lectura generada por la app para que el usuario o su asistente puedan analizar sus finanzas. Se sobrescribe en cada actualización: los cambios hechos aquí se pierden. Importes en euros (punto decimal). Gastos en positivo. Las compras financiadas (financiadoPor) no cuentan como gasto del mes: cuentan sus cuotas (movimientos con deudaId). Los traspasos entre cuentas, los ajustes de saldo y las compras/ventas de inversión NO son gastos ni ingresos (solo mueven saldos); la comisión de un traspaso sí es un gasto (comisionDeTraspasoId). Saldo de cuenta = saldo inicial + ingresos − gastos ± traspasos − compras + ventas ± ajustes, desde la fecha del saldo inicial. En los traspasos entre fondos el destino hereda coste y fechas FIFO (sin ganancia). Ganancias de inversiones calculadas por FIFO (método obligatorio en España para valores homogéneos); precios introducidos a mano por el usuario. resumenMensual.saldoInicial/saldoFinal: saldo del mes con arrastre (lo que sobra un mes pasa como saldo inicial del siguiente), calculado con las cuentas del día a día (corriente, efectivo, otra; o las marcadas con enSaldoMes) o, si no hay cuentas, con ingresos − gastos acumulados; saldoFinal = saldoInicial + ingresos − gastos + traspasadoAhorroInversion + inversionDesdeCuentasDelDia + movimientosEnCuentasAhorro + ajustesSaldo + aperturaCuentas.',
       categorias: estado.categorias ? { gasto: estado.categorias.gasto || [], ingreso: estado.categorias.ingreso || [] } : null,
       totales: { movimientos: movimientos.length, vehiculos: vehiculos.length, gastoCombustible: combustible.totales.gasto, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: capPend, cartera: tot,
         dineroEnCuentas: sal.total, patrimonioNeto: r2(sal.total + tot.valor - capPend), garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },

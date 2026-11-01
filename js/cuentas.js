@@ -15,7 +15,7 @@ function renderPatrimonio() {
   const filas = p.saldos.lista.filter(x => x.cuenta.activa !== false || Math.abs(x.saldo) > 0.004).sort((a, b) => ordenCuentas(a.cuenta, b.cuenta));
   $('#patrimonioBody').innerHTML = `<div class="patrimonio">
     ${filas.map(x => `<div class="pat-row"><span>${esc(iconoCuenta(x.cuenta))} ${esc(x.cuenta.nombre)}</span><strong class="${x.saldo < 0 ? 'neg' : ''}">${eur(x.saldo)}</strong></div>`).join('')}
-    ${p.hayCuentas ? `<div class="pat-row pat-sub"><span>Dinero en cuentas</span><strong>${eur(p.cuentas)}</strong></div>` : '<div class="pat-row muted small"><span>Aún no has creado cuentas: el patrimonio solo incluye inversiones y deudas.</span></div>'}
+    ${p.hayCuentas ? `<div class="pat-row pat-sub" id="patDisponible"><span>💶 Disponible (cuentas del día a día)</span><strong class="${p.disponible < 0 ? 'neg' : ''}">${eur(p.disponible)}</strong></div>${Math.abs(p.apartado) > 0.004 || p.saldos.lista.some(x => !CuentasCore.enSaldoMes(x.cuenta)) ? `<div class="pat-row pat-sub" id="patApartado"><span>🐷 En cuentas de ahorro/inversión</span><strong>${eur(p.apartado)}</strong></div>` : ''}<div class="pat-row pat-sub"><span>Dinero en cuentas (total)</span><strong>${eur(p.cuentas)}</strong></div>` : '<div class="pat-row muted small"><span>Aún no has creado cuentas: el patrimonio solo incluye inversiones y deudas.</span></div>'}
     <div class="pat-row"><span>📈 Inversiones (valor)</span><strong>${eur(p.inversiones)}</strong></div>
     ${p.deudas ? `<div class="pat-row"><span>💳 Deuda pendiente</span><strong class="neg">−${eur(p.deudas)}</strong></div>` : ''}
     <div class="pat-row pat-total"><span>Patrimonio neto</span><strong class="${p.neto < 0 ? 'neg' : 'pos'}">${eur(p.neto)}</strong></div></div>`;
@@ -85,7 +85,7 @@ function renderDetalleCuenta(S) {
   const h = CuentasCore.historial(c, S.flujos), per = $('#cdPeriodo').value, hoy = todayISO();
   let desde = '0000-00-00', hasta = '9999-12-31';
   if (per === '12') desde = addMonths(monthKey(hoy), -11) + '-01';
-  if (per === 'mes') { desde = UI.mes + '-01'; hasta = UI.mes + '-31'; }
+  if (per === 'mes') { desde = periodo().desde; hasta = periodo().hasta; }
   if (per === 'anio') { desde = UI.mes.slice(0, 4) + '-01-01'; hasta = UI.mes.slice(0, 4) + '-12-31'; }
   const filas = h.filter(f => f.fecha >= desde && f.fecha <= hasta);
   const ini = `<tr class="muted"><td>${c.fechaSaldo && c.fechaSaldo > '2000-01-01' ? fmtFecha(c.fechaSaldo) : '—'}</td><td>Saldo inicial</td><td class="num"></td><td class="num">${eur(c.saldoInicial)}</td><td></td></tr>`;
@@ -129,6 +129,8 @@ function openCuentaDialog(c, pre = {}) {
   f.fechaSaldo.value = c ? (c.fechaSaldo > '2000-01-01' ? c.fechaSaldo : '') : (pre.nombre ? primeraFechaNombre(pre.nombre) : todayISO());
   f.iban.value = c?.iban || ''; f.icono.value = c?.icono || ''; f.color.value = c?.color || '#0f766e';
   f.activa.checked = c ? c.activa !== false : true;
+  f.enSaldoMes.checked = c ? CuentasCore.enSaldoMes(c) : CuentasCore.enSaldoPorDefecto(f.tipo.value);
+  f.enSaldoMes.dataset.tocado = c && typeof c.enSaldoMes === 'boolean' ? '1' : '';
   $('#cuentaDialogTitle').textContent = c ? 'Editar cuenta' : 'Nueva cuenta';
   $('#cuentaDelete').style.display = c ? '' : 'none';
   $('#cuentaAyuda').textContent = pre.nombre
@@ -136,6 +138,8 @@ function openCuentaDialog(c, pre = {}) {
     : 'Saldo inicial: el dinero que había en la cuenta al empezar el día de la fecha indicada (lo anterior a esa fecha no cuenta). Para el efectivo, lo que llevas en la cartera.';
   $('#cuentaDialog').showModal();
 }
+$('#cuEnSaldo').addEventListener('change', e => { e.target.dataset.tocado = '1'; });
+$('#cuTipo').addEventListener('change', e => { const ch = $('#cuEnSaldo'); if (!ch.dataset.tocado) ch.checked = CuentasCore.enSaldoPorDefecto(e.target.value); });
 $('#cuTipo').addEventListener('change', e => { const ic = $('#cuIcono'); if (!ic.value || Object.values(CuentasCore.ICONO_TIPO).includes(ic.value)) ic.placeholder = CuentasCore.ICONO_TIPO[e.target.value]; });
 $('#cuentaForm').addEventListener('submit', async e => {
   e.preventDefault();
@@ -151,6 +155,8 @@ $('#cuentaForm').addEventListener('submit', async e => {
   const viejo = Store.get('cuentas', f.id.value);
   const c = { ...(viejo || {}), id: f.id.value || null, nombre, tipo: f.tipo.value, entidad: txt(f.entidad.value), saldoInicial: round2(saldo), fechaSaldo: f.fechaSaldo.value || '2000-01-01',
     iban, icono: txt(f.icono.value), color: f.color.value, activa: f.activa.checked, orden: viejo ? viejo.orden : Store.list('cuentas').length };
+  // v3.6: solo se guarda si es distinto de lo normal para su tipo (corriente/efectivo/otra sí; ahorro/inversión no)
+  if (f.enSaldoMes.checked !== CuentasCore.enSaldoPorDefecto(c.tipo)) c.enSaldoMes = f.enSaldoMes.checked; else delete c.enSaldoMes;
   const r = await Store.saveCuenta(c);
   CuUI.sel = r?.id || CuUI.sel;
   $('#cuentaDialog').close(); toast(viejo ? 'Cuenta guardada' : 'Cuenta creada');
