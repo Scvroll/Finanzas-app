@@ -26,7 +26,13 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 ## Funciones
 
 ### Resumen y movimientos
-- **Resumen mensual:** ingresos, gastos, balance, tasa de ahorro, gastos fijos/variables, gráfico por categoría, evolución de 12 meses, top de categorías y últimos movimientos.
+- **Selector de periodo Mes / Año (v3.6):** arriba eliges ver un **mes** (por defecto) o un **año entero**; la app recuerda lo último elegido. En modo año, el resumen, el gráfico, las categorías, los últimos movimientos y los filtros «Periodo de arriba» (Movimientos y Cuentas) usan el año completo; ‹ › saltan de año en año.
+- **Saldo del mes con arrastre (v3.6):** el dinero que sobra un mes pasa como **saldo inicial** del siguiente. Tarjeta «Saldo del mes»: saldo inicial (lo que sobró el mes anterior) + ingresos − gastos (= «Resultado del mes», que sigue a la vista) ± lo traspasado a ahorro/inversión ± compras de inversión, ajustes y apertura de cuentas = **saldo final**, que es el saldo inicial del mes siguiente. Es un cálculo: **no se crean apuntes**, así que si cambias un mes pasado se recalculan solos los siguientes.
+  - Con cuentas: cuentan las cuentas **del día a día** (por defecto corriente, efectivo y «otra»; las de ahorro e inversión no). Se cambia en cada cuenta con la casilla «Cuenta del día a día». Un traspaso entre dos cuentas del día a día no cambia el saldo; uno a una cuenta de ahorro/inversión sale de él («Traspasado a ahorro/inversión»). Se respetan el saldo inicial y la fecha de cada cuenta («Apertura de cuentas»).
+  - Sin cuentas: ingresos − gastos acumulados desde el primer mes con movimientos.
+  - En modo año: saldo inicial a 1 de enero (lo que sobró del año anterior), totales del año, saldo final a 31 de diciembre y tabla **mes a mes** (pulsa un mes para abrirlo). El gráfico de evolución añade la línea «Saldo final».
+  - En Patrimonio, «Dinero en cuentas» se separa en **Disponible (cuentas del día a día)** y **En cuentas de ahorro/inversión**.
+- **Resumen mensual:** ingresos, gastos, resultado (antes «balance»), tasa de ahorro, gastos fijos/variables, gráfico por categoría, evolución de 12 meses, top de categorías y últimos movimientos.
 - **Movimientos:** gastos e ingresos con importes en formato español (`12,50`, `1.234,56`), búsqueda y filtros.
   - Gastos **fijos o variables** (se propone según la categoría; p. ej. Vivienda y Suministros = fijo).
   - Ingresos de tipo **Nómina, Extra u Otro**.
@@ -159,7 +165,7 @@ Esquema (versión 3, resumido):
   precios:     [...],                     // historial de precios apuntados a mano
   vehiculos:   [{ id, matricula, nombre, combustible: 'gasoil'|'gasolina'|'otro', capacidad, kmIniciales, activo, notas, creado }],   // v3.3
   repostajes:  [{ id, vehiculoId, movimientoId, fecha, litros, precioLitro, importe, kmTanqueAnterior, odometro, lleno, gasolinera, creado }],   // v3.3
-  cuentas:     [{ id, nombre, tipo: 'corriente'|'ahorro'|'inversion'|'efectivo'|'otra', entidad, iban /* 4 últimos dígitos */, saldoInicial, fechaSaldo, color, icono, activa, orden, notas }],   // v3.4
+  cuentas:     [{ id, nombre, tipo: 'corriente'|'ahorro'|'inversion'|'efectivo'|'otra', entidad, iban /* 4 últimos dígitos */, saldoInicial, fechaSaldo, color, icono, activa, orden, notas, enSaldoMes? /* v3.6: solo si difiere de lo normal del tipo */ }],   // v3.4
   traspasos:   [{ id, fecha, origenId, destinoId, importe, comision, nota, comisionMovId }],   // v3.4: entre cuentas; la comisión es el gasto com_<id>
   regularizaciones: [{ id, cuentaId, fecha, importe /* con signo */, saldoReal, nota }],      // v3.4: «Ajustar saldo»
   traspasosFondos:  [{ id, fecha, origenId, destinoId, todas, participaciones, participacionesDestino, vlOrigen, vlDestino, notas, creado }],   // v3.4
@@ -205,6 +211,7 @@ Menú de tu foto → **Cerrar sesión**. La app pregunta si quieres borrar tambi
 node tests/finance.test.js          # cálculos: cuota, TAE, FIFO, recurrentes, garantías, combustible, CSV, migración
 node tests/sync.test.js             # sincronización con Drive simulado (dos dispositivos, sin conexión, versiones antiguas)
 node tests/cuentas.test.js          # cuentas: saldos, traspasos, ajustes, dinero invertido, traspasos entre fondos, copia para análisis
+node tests/saldo-mes.test.js        # v3.6: saldo del mes con arrastre (con y sin cuentas) y vista de año
 
 # Tests de navegador (necesitan Google Chrome y playwright-core: npm i playwright-core)
 python3 -m http.server 8765 &       # desde la carpeta finanzas-app

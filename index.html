@@ -19,9 +19,11 @@
 <header>
   <div class="topbar">
     <div class="brand">💶 Mis Finanzas</div>
-    <div class="month-nav" aria-label="Selector de mes">
+    <div class="month-nav" aria-label="Selector de periodo">
+      <div class="seg seg-xs periodo-seg" role="radiogroup" aria-label="Ver por mes o por año"><input type="radio" name="periodoTipo" id="periodoMes" value="mes" checked><label for="periodoMes">Mes</label><input type="radio" name="periodoTipo" id="periodoAnio" value="anio"><label for="periodoAnio">Año</label></div>
       <button class="icon-btn" id="prevMonth" title="Mes anterior" aria-label="Mes anterior">‹</button>
       <input type="month" id="monthInput" style="width:auto" aria-label="Mes">
+      <select id="yearInput" aria-label="Año" hidden></select>
       <button class="icon-btn" id="nextMonth" title="Mes siguiente" aria-label="Mes siguiente">›</button>
     </div>
     <button class="icon-btn" id="themeBtn" title="Cambiar tema" aria-label="Cambiar tema">🌓</button>
@@ -69,16 +71,17 @@
     <div class="grid kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="label">Ingresos</div><div class="value pos" id="kpiIngresos">0 €</div><div class="sub" id="kpiIngresosN"></div></div>
       <div class="kpi"><div class="label">Gasto real</div><div class="value neg" id="kpiGastos">0 €</div><div class="sub" id="kpiGastosN"></div></div>
-      <div class="kpi"><div class="label">Ahorro (ingresos − gasto)</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
+      <div class="kpi"><div class="label" id="kpiBalanceLabel">Resultado del mes (ingresos − gasto)</div><div class="value" id="kpiBalance">0 €</div><div class="sub" id="kpiBalanceSub"></div></div>
       <div class="kpi"><div class="label">Tasa de ahorro</div><div class="value" id="kpiAhorro">—</div><div class="sub">Ahorro / ingresos</div></div>
       <div class="kpi"><div class="label">Invertido (neto)</div><div class="value" id="kpiInvertido">0 €</div><div class="sub" id="kpiInvertidoSub">Compras − ventas del mes</div></div>
     </div>
     <p class="muted small" id="kpiTraspasos" style="margin:-8px 0 12px" hidden></p>
+    <div class="card" id="saldoMesCard"><div class="card-head"><h3 style="margin:0" id="saldoMesTitle">Saldo del mes</h3><span class="muted small" id="saldoMesModo"></span></div><div id="saldoMesBody"></div></div>
     <div class="card" id="patrimonioCard" hidden><div class="card-head"><h3 style="margin:0">Patrimonio (hoy)</h3><button class="btn-sm" data-ir-cuentas>Ver cuentas</button></div><div id="patrimonioBody"></div></div>
     <div class="card"><h3>Desglose del mes</h3><div id="desgloseBody"></div></div>
     <div class="grid charts">
       <div class="card"><h3>Gastos por categoría</h3><div class="chart-box"><canvas id="chartCategorias"></canvas><div class="empty" id="chartCategoriasEmpty" style="position:absolute;inset:0;display:none;align-items:center;justify-content:center">Sin gastos este mes</div></div></div>
-      <div class="card"><h3>Evolución últimos 12 meses</h3><div class="chart-box"><canvas id="chartEvolucion"></canvas></div></div>
+      <div class="card"><h3 id="chartEvolucionTitle">Evolución últimos 12 meses</h3><div class="chart-box"><canvas id="chartEvolucion"></canvas></div></div>
     </div>
     <div class="two-col">
       <div class="card">
@@ -86,7 +89,7 @@
         <div class="table-wrap"><table><thead><tr><th>Categoría</th><th class="num">Importe</th><th class="num">%</th></tr></thead><tbody id="topCatBody"></tbody></table></div>
       </div>
       <div class="card">
-        <h3>Últimos movimientos del mes</h3>
+        <h3 id="ultimosTitle">Últimos movimientos del mes</h3>
         <div class="table-wrap"><table><tbody id="ultimosBody"></tbody></table></div>
       </div>
     </div>
@@ -104,7 +107,7 @@
       </div>
       <div class="toolbar">
         <div class="grow"><label for="fTexto">Buscar</label><input id="fTexto" type="search" placeholder="Descripción, categoría, cuenta…"></div>
-        <div><label for="fPeriodo">Periodo</label><select id="fPeriodo"><option value="mes">Mes seleccionado</option><option value="anio">Año seleccionado</option><option value="todo">Todo</option></select></div>
+        <div><label for="fPeriodo">Periodo</label><select id="fPeriodo"><option value="mes">Periodo de arriba (mes o año)</option><option value="anio">Año completo</option><option value="todo">Todo</option></select></div>
         <div><label for="fTipo">Tipo</label><select id="fTipo"><option value="">Todos</option><option value="gasto">Gastos</option><option value="ingreso">Ingresos</option></select></div>
         <div><label for="fCategoria">Categoría</label><select id="fCategoria"><option value="">Todas</option></select></div>
       </div>
@@ -140,7 +143,7 @@
     <div class="cuentas-grid" id="cuentasGrid"></div>
     <div class="card" id="cuentaDetalle" hidden>
       <div class="card-head"><h3 style="margin:0" id="cdTitulo">Movimientos de la cuenta</h3>
-        <div class="toolbar" style="margin:0"><div><label for="cdFiltro">Cuenta</label><select id="cdFiltro"></select></div><div><label for="cdPeriodo">Periodo</label><select id="cdPeriodo"><option value="12">Últimos 12 meses</option><option value="mes">Mes seleccionado</option><option value="anio">Año seleccionado</option><option value="todo">Todo</option></select></div></div></div>
+        <div class="toolbar" style="margin:0"><div><label for="cdFiltro">Cuenta</label><select id="cdFiltro"></select></div><div><label for="cdPeriodo">Periodo</label><select id="cdPeriodo"><option value="12">Últimos 12 meses</option><option value="mes">Periodo de arriba (mes o año)</option><option value="anio">Año completo</option><option value="todo">Todo</option></select></div></div></div>
       <div class="chart-box" style="height:220px"><canvas id="chartCuenta"></canvas></div>
       <div class="table-wrap"><table class="compact"><thead><tr><th>Fecha</th><th>Concepto</th><th class="num">Importe</th><th class="num">Saldo</th><th></th></tr></thead><tbody id="cdBody"></tbody></table></div>
       <p class="muted small" id="cdNota" style="margin-bottom:0"></p>
@@ -602,6 +605,7 @@
       <div><label for="cuFecha">Fecha del saldo</label><input id="cuFecha" name="fechaSaldo" type="date"></div>
       <div><label for="cuIban">Últimos 4 dígitos del IBAN (opcional)</label><input id="cuIban" name="iban" maxlength="42" placeholder="1234 (o pega el IBAN entero)" autocomplete="off"></div>
       <div><label for="cuIcono">Icono y color (opcional)</label><div class="cat-row"><input id="cuIcono" name="icono" maxlength="4" placeholder="🏦" style="max-width:5em"><input id="cuColor" name="color" type="color" value="#0f766e" style="max-width:4em;padding:2px"></div></div>
+      <div class="full"><label class="check"><input type="checkbox" name="enSaldoMes" id="cuEnSaldo" checked> Cuenta del día a día: su dinero cuenta en el saldo del mes y en el disponible <span class="muted small" id="cuEnSaldoAyuda">(desmárcala para cuentas de ahorro o inversión: lo que traspases a ellas sale del saldo del mes)</span></label></div>
       <div class="full"><label class="check"><input type="checkbox" name="activa" checked> En uso (desmárcala para archivarla: deja de salir al elegir cuenta)</label></div>
     </div>
     <p class="muted small" id="cuentaAyuda">Saldo inicial: el dinero que había en la cuenta al empezar el día de la fecha indicada. Lo anterior a esa fecha no cuenta. Para el efectivo, cuenta lo que llevas en la cartera.</p>

@@ -106,6 +106,12 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.6 (saldo del mes con arrastre y vista de año)
+
+- Sube **todos** los archivos (en `sw.js`, `VERSION = 'finanzas-v3.6.0'`). No cambia nada en Google Cloud ni en el formato de tus datos: el arrastre es un cálculo, no crea movimientos.
+- Hay un test nuevo (`tests/saldo-mes.test.js`), que no hace falta subir.
+- La casilla «Cuenta del día a día» solo se guarda si la cambias respecto a lo normal de su tipo. **Si editas esa cuenta en un dispositivo con la v3.5**, se pierde la marca y vuelve a lo normal de su tipo. Actualiza todos los dispositivos (abre la app con conexión en cada uno).
+
 ### Actualizar a la v3.5 (deudas: «Calcular cuotas» o «Cuota manual»)
 
 - Sube **todos** los archivos (en `sw.js`, `VERSION = 'finanzas-v3.5.0'`). No hay archivos nuevos ni cambia nada en Google Cloud.

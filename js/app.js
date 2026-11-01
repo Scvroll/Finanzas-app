@@ -176,7 +176,8 @@ const NORMALIZAR = {
     const iban = String(c.iban || '').replace(/[^0-9A-Za-z]/g, '').slice(-4).toUpperCase();   // solo los últimos dígitos, nunca el IBAN completo
     return { id: c.id || uid(), nombre: txt(c.nombre).slice(0, 60), tipo: TIPOS_CUENTA[c.tipo] ? c.tipo : 'corriente', entidad: txt(c.entidad), iban,
       saldoInicial: round2(num(c.saldoInicial)), fechaSaldo: FC.isISO(c.fechaSaldo) ? c.fechaSaldo : '2000-01-01',
-      color: /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '', icono: txt(c.icono).slice(0, 4), activa: c.activa !== false, orden: num(c.orden), notas: txt(c.notas) };
+      color: /^#[0-9a-f]{6}$/i.test(c.color || '') ? c.color : '', icono: txt(c.icono).slice(0, 4), activa: c.activa !== false, orden: num(c.orden), notas: txt(c.notas),
+      ...(typeof c.enSaldoMes === 'boolean' ? { enSaldoMes: c.enSaldoMes } : {}) };   // v3.6: solo si se cambia lo que toca por su tipo
   },
   traspasos(t) {
     if (!FC.isISO(t.fecha) || !t.origenId || !t.destinoId || t.origenId === t.destinoId || !(num(t.importe) > 0)) return null;
@@ -436,10 +437,10 @@ const Store = {
    ========================================================= */
 const Calc = {
   /** Las compras financiadas no cuentan como gasto del mes: cuentan sus cuotas al pagarse. */
-  resumenMes(movs, ym) {
+  resumenMes(movs, ym) {   // ym: 'YYYY-MM' (mes) o 'YYYY' (año)
     const r = { ingresos: 0, gastos: 0, nI: 0, nG: 0, fijos: 0, variables: 0, deuda: 0, interesesDeuda: 0, nomina: 0, extra: 0, otrosIngresos: 0, financiado: 0 };
     for (const m of movs) {
-      if (monthKey(m.fecha) !== ym) continue;
+      if (!String(m.fecha).startsWith(ym)) continue;
       if (m.tipo === 'ingreso') {
         r.ingresos += m.importe; r.nI++;
         if (m.tipoIngreso === 'nomina') r.nomina += m.importe; else if (m.tipoIngreso === 'extra') r.extra += m.importe; else r.otrosIngresos += m.importe;
@@ -457,7 +458,7 @@ const Calc = {
   },
   gastosPorCategoria(movs, ym) {
     const map = {};
-    for (const m of movs) if (m.tipo === 'gasto' && !m.financiadoPor && monthKey(m.fecha) === ym) map[m.categoria] = round2((map[m.categoria] || 0) + m.importe);
+    for (const m of movs) if (m.tipo === 'gasto' && !m.financiadoPor && String(m.fecha).startsWith(ym)) map[m.categoria] = round2((map[m.categoria] || 0) + m.importe);
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   },
   ultimos12(movs, ym) {
@@ -487,11 +488,17 @@ const Calc = {
     return { cuentas: Store.list('cuentas'), movimientos: Store.getMovimientos(), traspasos: Store.list('traspasos'), regularizaciones: Store.list('regularizaciones'), operaciones: Store.list('operaciones'), activos: Store.list('activos') };
   },
   saldos(hoy = todayISO()) { return CuentasCore.saldos(this.datosCuentas(), hoy); },
+  /** v3.6: saldo del mes / del año con arrastre (calculado: editar un mes pasado recalcula los siguientes). */
+  saldoMes(ym) { return CuentasCore.saldoMes(this.datosCuentas(), ym); },
+  saldosMensuales(meses) { return CuentasCore.saldosMensuales(this.datosCuentas(), meses); },
+  saldoAnio(anio) { return CuentasCore.saldoAnio(this.datosCuentas(), anio); },
   /** Patrimonio neto = dinero en cuentas + valor de las inversiones − deuda pendiente. */
   patrimonio() {
     const s = this.saldos(), car = this.cartera(), deudas = this.deudas();
     const pendiente = round2(deudas.reduce((t, d) => t + (d.pendiente || 0), 0));
-    return { saldos: s, cuentas: s.total, inversiones: car.tot.valor, deudas: pendiente, neto: round2(s.total + car.tot.valor - pendiente), hayCuentas: s.lista.length > 0 };
+    const activas = s.lista.filter(x => x.cuenta.activa !== false || Math.abs(x.saldo) > 0.004);
+    const disponible = round2(activas.filter(x => CuentasCore.enSaldoMes(x.cuenta)).reduce((t, x) => t + x.saldo, 0));
+    return { saldos: s, cuentas: s.total, disponible, apartado: round2(s.total - disponible), inversiones: car.tot.valor, deudas: pendiente, neto: round2(s.total + car.tot.valor - pendiente), hayCuentas: s.lista.length > 0 };
   },
   /** Garantías de los gastos, ordenadas por vencimiento. */
   garantias(dias = Store.state.ajustes.avisoGarantiaDias) {
@@ -506,7 +513,14 @@ const Calc = {
 /* =========================================================
    UI
    ========================================================= */
-const UI = { mes: monthKey(todayISO()), charts: {} };
+const UI = { mes: monthKey(todayISO()), periodo: (() => { try { return localStorage.getItem('finanzas.periodo') === 'anio' ? 'anio' : 'mes'; } catch { return 'mes'; } })(), charts: {} };
+/** Periodo elegido arriba: un mes (por defecto) o un año entero (v3.6). */
+function periodo() {
+  const anio = UI.mes.slice(0, 4);
+  if (UI.periodo === 'anio') return { tipo: 'anio', clave: anio, anio, desde: `${anio}-01-01`, hasta: `${anio}-12-31`, label: anio, nombre: 'año' };
+  return { tipo: 'mes', clave: UI.mes, anio, desde: `${UI.mes}-01`, hasta: CuentasCore.finDeMes(UI.mes), label: monthLabel(UI.mes), nombre: 'mes' };
+}
+const enPeriodo = fecha => String(fecha || '').startsWith(periodo().clave);
 const PALETTE = ['#0f766e', '#f59e0b', '#3b82f6', '#ef4444', '#8b5cf6', '#10b981', '#ec4899', '#6366f1', '#84cc16', '#f97316', '#06b6d4', '#a855f7', '#64748b', '#eab308', '#14b8a6', '#e11d48', '#0ea5e9'];
 
 function applyTheme() {
@@ -519,7 +533,23 @@ function applyTheme() {
 
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
-function setMes(ym) { UI.mes = ym; $('#monthInput').value = ym; renderAll(); }
+function pintarSelectorPeriodo() {
+  const anio = UI.periodo === 'anio', y = Number(UI.mes.slice(0, 4)), hoyY = Number(todayISO().slice(0, 4));
+  $('#monthInput').value = UI.mes; $('#monthInput').hidden = anio;
+  const ys = Store.getMovimientos().map(m => Number(String(m.fecha).slice(0, 4))).filter(n => n > 1900);
+  const desde = Math.min(y, hoyY - 1, ...ys), hasta = Math.max(y, hoyY + 1, ...ys);
+  const sel = $('#yearInput'); sel.hidden = !anio;
+  sel.innerHTML = Array.from({ length: hasta - desde + 1 }, (_, i) => hasta - i).map(n => `<option value="${n}">${n}</option>`).join(''); sel.value = String(y);
+  $('#periodoMes').checked = !anio; $('#periodoAnio').checked = anio;
+  const t = anio ? ['Año anterior', 'Año siguiente'] : ['Mes anterior', 'Mes siguiente'];
+  $('#prevMonth').title = t[0]; $('#prevMonth').setAttribute('aria-label', t[0]); $('#nextMonth').title = t[1]; $('#nextMonth').setAttribute('aria-label', t[1]);
+}
+function setMes(ym) { UI.mes = ym; pintarSelectorPeriodo(); renderAll(); }
+function setPeriodo(tipo) {
+  UI.periodo = tipo === 'anio' ? 'anio' : 'mes';
+  try { localStorage.setItem('finanzas.periodo', UI.periodo); } catch { /* sin almacenamiento: solo esta sesión */ }
+  pintarSelectorPeriodo(); renderAll();
+}
 
 function showView(v) {
   $$('nav.tabs button').forEach(b => b.classList.toggle('active', b.dataset.view === v));
@@ -530,24 +560,27 @@ function showView(v) {
 }
 
 function renderResumen() {
-  const movs = Store.getMovimientos();
-  const r = Calc.resumenMes(movs, UI.mes);
-  $('#resumenTitle').textContent = 'Resumen de ' + monthLabel(UI.mes);
+  const movs = Store.getMovimientos(), P = periodo(), esAnio = P.tipo === 'anio';
+  const r = Calc.resumenMes(movs, P.clave);
+  $('#resumenTitle').textContent = (esAnio ? 'Resumen del año ' : 'Resumen de ') + P.label;
+  $('#kpiBalanceLabel').textContent = `Resultado del ${P.nombre} (ingresos − gasto)`;
   $('#kpiIngresos').textContent = eur(r.ingresos);
   $('#kpiGastos').textContent = eur(r.gastos);
   $('#kpiIngresosN').textContent = `${r.nI} movimiento${r.nI === 1 ? '' : 's'}`;
   $('#kpiGastosN').textContent = `${r.nG} movimiento${r.nG === 1 ? '' : 's'}`;
   const b = $('#kpiBalance'); b.textContent = eur(r.balance); b.className = 'value ' + (r.balance > 0 ? 'pos' : r.balance < 0 ? 'neg' : '');
-  const prev = Calc.resumenMes(movs, addMonths(UI.mes, -1));
-  $('#kpiBalanceSub').textContent = 'Mes anterior: ' + eur(prev.balance);
+  const prev = Calc.resumenMes(movs, esAnio ? String(Number(P.anio) - 1) : addMonths(UI.mes, -1));
+  $('#kpiBalanceSub').textContent = (esAnio ? 'Año anterior: ' : 'Mes anterior: ') + eur(prev.balance);
   const a = $('#kpiAhorro'); a.textContent = pct(r.tasaAhorro); a.className = 'value ' + (r.tasaAhorro > 0 ? 'pos' : r.tasaAhorro < 0 ? 'neg' : '');
   // v3.4: dinero invertido (no es gasto), traspasos (no cuentan) y patrimonio
-  const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), UI.mes);
+  const inv = CuentasCore.invertidoPeriodo(Store.list('operaciones'), P.clave);
   $('#kpiInvertido').textContent = eur(inv.neto);
-  $('#kpiInvertidoSub').textContent = inv.n ? `Compras ${eur(inv.compras)}${inv.ventas ? ` − ventas ${eur(inv.ventas)}` : ''} · no es gasto` : 'Sin compras ni ventas este mes';
-  const tp = CuentasCore.traspasosPeriodo(Store.list('traspasos'), UI.mes);
+  $('#kpiInvertidoSub').textContent = inv.n ? `Compras ${eur(inv.compras)}${inv.ventas ? ` − ventas ${eur(inv.ventas)}` : ''} · no es gasto` : `Sin compras ni ventas este ${P.nombre}`;
+  const tp = CuentasCore.traspasosPeriodo(Store.list('traspasos'), P.clave);
   $('#kpiTraspasos').hidden = !tp.n;
-  $('#kpiTraspasos').textContent = tp.n ? `⇄ ${tp.n} traspaso${tp.n === 1 ? '' : 's'} entre tus cuentas este mes (${eur(tp.importe)}): no cuentan como gasto ni como ingreso.` : '';
+  $('#kpiTraspasos').textContent = tp.n ? `⇄ ${tp.n} traspaso${tp.n === 1 ? '' : 's'} entre tus cuentas este ${P.nombre} (${eur(tp.importe)}): no cuentan como gasto ni como ingreso.` : '';
+  const saldo = esAnio ? Calc.saldoAnio(P.anio) : Calc.saldoMes(UI.mes);
+  renderSaldoMes(saldo, P);
   renderPatrimonio();
 
   // Desglose: fijos / variables y nómina / extra
@@ -557,25 +590,62 @@ function renderResumen() {
     <div class="desglose">
       <div><h4>Gastos: fijos y variables</h4>${barra([['Fijos', r.fijos, 'c-fijo'], ['Variables', r.variables, 'c-var']], r.gastos)}
         <table><tbody>${fila('Fijos', r.fijos, r.gastos, 'c-fijo', r.deuda ? `<div class="muted small">incluye ${eur(r.deuda)} de cuotas de deudas (${eur(r.interesesDeuda)} de intereses)</div>` : '')}${fila('Variables', r.variables, r.gastos, 'c-var')}</tbody></table>
-        ${r.financiado ? `<p class="muted small">Compras financiadas este mes: ${eur(r.financiado)} (no cuentan aquí; cuentan sus cuotas cuando las pagas).</p>` : ''}</div>
+        ${r.financiado ? `<p class="muted small">Compras financiadas este ${P.nombre}: ${eur(r.financiado)} (no cuentan aquí; cuentan sus cuotas cuando las pagas).</p>` : ''}</div>
       <div><h4>Ingresos: nómina y extra</h4>${barra([['Nómina', r.nomina, 'c-nom'], ['Extra', r.extra, 'c-extra'], ['Otros', r.otrosIngresos, 'c-otro']], r.ingresos)}
         <table><tbody>${fila('Nómina', r.nomina, r.ingresos, 'c-nom')}${fila('Extra', r.extra, r.ingresos, 'c-extra')}${r.otrosIngresos ? fila('Otros', r.otrosIngresos, r.ingresos, 'c-otro') : ''}</tbody></table></div>
     </div>`;
 
-  const cats = Calc.gastosPorCategoria(movs, UI.mes);
+  const cats = Calc.gastosPorCategoria(movs, P.clave);
   $('#topCatBody').innerHTML = cats.length ? cats.slice(0, 8).map(([c, v], i) =>
     `<tr><td><span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${PALETTE[i % PALETTE.length]};margin-right:6px"></span>${esc(c)}</td><td class="num">${eur(v)}</td><td class="num">${pct(r.gastos ? v / r.gastos : 0)}</td></tr>`).join('')
-    : '<tr><td colspan="3" class="empty">Sin gastos este mes</td></tr>';
+    : `<tr><td colspan="3" class="empty">Sin gastos este ${P.nombre}</td></tr>`;
 
-  const ult = movs.filter(m => monthKey(m.fecha) === UI.mes).sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 6);
+  $('#ultimosTitle').textContent = `Últimos movimientos del ${P.nombre}`;
+  const ult = movs.filter(m => enPeriodo(m.fecha)).sort((x, y) => y.fecha.localeCompare(x.fecha)).slice(0, 6);
   $('#ultimosBody').innerHTML = ult.length ? ult.map(m =>
     `<tr><td>${fmtFecha(m.fecha)}</td><td>${esc(m.descripcion || m.categoria)}<div class="muted" style="font-size:.8rem">${esc(m.categoria)} ${badges(m)}</div></td><td class="num ${m.tipo === 'ingreso' ? 'pos' : 'neg'}">${m.tipo === 'ingreso' ? '+' : '−'}${eur(m.importe)}</td></tr>`).join('')
-    : '<tr><td class="empty">No hay movimientos este mes. Pulsa «＋ Movimiento» para añadir uno.</td></tr>';
+    : `<tr><td class="empty">No hay movimientos este ${P.nombre}. Pulsa «＋ Movimiento» para añadir uno.</td></tr>`;
 
-  renderCharts(cats);
+  renderCharts(cats, P);
 }
 
-function renderCharts(cats) {
+/** v3.6: «Saldo del mes» (o del año) con arrastre: saldo inicial + resultado ± traspasos = saldo final. */
+function renderSaldoMes(s, P) {
+  const esAnio = P.tipo === 'anio', hoy = todayISO();
+  const finLbl = esAnio ? (P.anio === hoy.slice(0, 4) ? `Saldo final del año (a 31 dic, con lo apuntado hasta hoy)` : `Saldo final a 31 dic ${P.anio}`) : `Saldo final del mes (pasa a ${monthLabel(addMonths(UI.mes, 1))})`;
+  const iniLbl = esAnio ? `Saldo inicial a 1 ene ${P.anio} <span class="muted small">(lo que sobró del año anterior)</span>` : `Saldo inicial <span class="muted small">(lo que sobró de ${monthLabel(addMonths(UI.mes, -1))})</span>`;
+  const linea = (lbl, v, cls = '', id = '') => `<tr${id ? ` data-saldo="${id}"` : ''} class="${cls}"><td>${lbl}</td><td class="num ${v > 0.004 ? 'pos' : v < -0.004 ? 'neg' : ''}">${v > 0.004 ? '+' : v < -0.004 ? '−' : ''}${eur(Math.abs(v))}</td></tr>`;
+  const opc = (lbl, v, id) => Math.abs(v) > 0.004 ? linea(lbl, v, '', id) : '';
+  $('#saldoMesTitle').textContent = esAnio ? `Saldo del año ${P.anio}` : 'Saldo del mes';
+  $('#saldoMesModo').textContent = s.modo === 'cuentas' ? 'Cuentas del día a día' : 'Calculado con tus movimientos';
+  const liquidas = Store.list('cuentas').filter(c => CuentasCore.enSaldoMes(c)), fuera = Store.list('cuentas').filter(c => !CuentasCore.enSaldoMes(c));
+  const nota = s.modo === 'cuentas'
+    ? `Cuentan: ${liquidas.map(c => esc(c.nombre)).join(', ') || 'ninguna'}${fuera.length ? `. Aparte (ahorro/inversión): ${fuera.map(c => esc(c.nombre)).join(', ')}` : ''}. Lo que pasas entre cuentas del día a día no cambia el saldo; lo que pasas a ahorro/inversión sale de él. Lo puedes cambiar en cada cuenta (Cuentas → ✏️).`
+      + (s.sinCuentaDespues ? ` Tienes ${s.sinCuentaDespues} movimiento(s) sin cuenta: también cuentan aquí, así que este saldo puede no cuadrar con el de tus cuentas hasta que se la pongas.` : '')
+    : `Calculado con tus ingresos y gastos acumulados desde ${s.primerMes ? monthLabel(s.primerMes) : 'tu primer movimiento'}, sin crear movimientos: si cambias un mes pasado, se recalcula solo. Si añades tus cuentas (pestaña Cuentas) con su saldo, se usará el saldo real.`;
+  let tabla = '';
+  if (esAnio) {
+    const filas = s.meses.filter(m => m.mes <= monthKey(hoy) || Math.abs(m.resultado) > 0.004 || Math.abs(m.saldoFinal - m.saldoInicial) > 0.004);
+    tabla = `<details class="saldo-anual" open><summary>Mes a mes</summary><div class="table-wrap"><table class="small-table" id="saldoAnualTabla"><thead><tr><th>Mes</th><th class="num">Inicial</th><th class="num">Ingresos</th><th class="num">Gastos</th><th class="num" title="Traspasos a ahorro/inversión, compras/ventas de inversión, ajustes y apertura de cuentas">Otros*</th><th class="num">Final</th></tr></thead><tbody>${filas.map(m => {
+      const otros = round2(m.saldoFinal - m.saldoInicial - m.resultado);
+      return `<tr><td><a href="#" data-ir-mes="${m.mes}">${monthLabel(m.mes, true)}</a></td><td class="num">${eur(m.saldoInicial)}</td><td class="num pos">${eur(m.ingresos)}</td><td class="num neg">${eur(m.gastos)}</td><td class="num">${Math.abs(otros) > 0.004 ? eur(otros) : '—'}</td><td class="num"><strong>${eur(m.saldoFinal)}</strong></td></tr>`; }).join('')}</tbody></table></div><p class="muted small">* Otros: traspasos a ahorro/inversión, compras/ventas de inversión, ajustes y apertura de cuentas. Pulsa un mes para verlo.</p></details>`;
+  }
+  $('#saldoMesBody').innerHTML = `<div class="table-wrap"><table class="saldo-mes" id="saldoMesTabla"><tbody>
+    ${linea(iniLbl, s.saldoInicial, 'saldo-ini', 'inicial')}
+    ${linea('+ Ingresos', s.ingresos, '', 'ingresos')}
+    ${linea('− Gastos', -s.gastos, '', 'gastos')}
+    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
+    ${opc('Traspasado a ahorro/inversión (neto)', s.traspasos, 'traspasos')}
+    ${opc('Compras/ventas de inversión pagadas desde estas cuentas', s.inversion, 'inversion')}
+    ${opc('Ingresos/gastos apuntados en cuentas de ahorro/inversión', s.fuera, 'fuera')}
+    ${opc('Ajustes de saldo', s.ajustes, 'ajustes')}
+    ${opc('Apertura de cuentas <span class="muted small">(se toma el saldo real que pusiste en tus cuentas)</span>', s.apertura, 'apertura')}
+    <tr class="saldo-fin"><td><strong>${finLbl}</strong></td><td class="num"><strong data-saldo-val="final">${eur(s.saldoFinal)}</strong></td></tr>
+  </tbody></table></div>${tabla}<p class="muted small" id="saldoMesNota">${nota}</p>`;
+  $$('#saldoMesBody [data-ir-mes]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); UI.mes = a.dataset.irMes; setPeriodo('mes'); }));
+}
+
+function renderCharts(cats, P = periodo()) {
   if (typeof Chart === 'undefined') return; // sin conexión al CDN: la app sigue funcionando sin gráficos
   const text = cssVar('--text'), grid = cssVar('--border'), muted = cssVar('--muted');
   Chart.defaults.color = muted; Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
@@ -589,13 +659,18 @@ function renderCharts(cats) {
   else UI.charts.cat = new Chart($('#chartCategorias'), { type: 'doughnut', data: dData, options: { maintainAspectRatio: false, cutout: '62%', plugins: { legend: { position: 'bottom', labels: { color: text, boxWidth: 12 } }, tooltip: { callbacks: { label: ctx => `${ctx.label}: ${eur(ctx.parsed)}` } } } } });
 
   // Barras 12 meses
-  const serie = Calc.ultimos12(Store.getMovimientos(), UI.mes);
+  // v3.6: en vista de año, los 12 meses de ese año; si no, los últimos 12 meses. Línea de «Saldo final» (arrastre).
+  const finSerie = P.tipo === 'anio' ? `${P.anio}-12` : UI.mes;
+  const serie = Calc.ultimos12(Store.getMovimientos(), finSerie);
+  const saldosSerie = Calc.saldosMensuales(serie.map(s => s.mes));
+  $('#chartEvolucionTitle').textContent = P.tipo === 'anio' ? `Mes a mes en ${P.anio}` : 'Evolución últimos 12 meses';
   const eData = {
     labels: serie.map(s => monthLabel(s.mes, true)),
     datasets: [
       { type: 'bar', label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: cssVar('--ok'), borderRadius: 4 },
       { type: 'bar', label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: cssVar('--danger'), borderRadius: 4 },
-      { type: 'line', label: 'Balance', data: serie.map(s => s.balance), borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 }
+      { type: 'line', label: 'Resultado', data: serie.map(s => s.balance), borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 },
+      { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 }
     ]
   };
   const eOpts = { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
@@ -610,7 +685,7 @@ function filtrarMovimientos() {
   const per = $('#fPeriodo').value, tipo = $('#fTipo').value, cat = $('#fCategoria').value;
   const anio = UI.mes.slice(0, 4);
   return Store.getMovimientos().filter(m => {
-    if (per === 'mes' && monthKey(m.fecha) !== UI.mes) return false;
+    if (per === 'mes' && !enPeriodo(m.fecha)) return false;
     if (per === 'anio' && m.fecha.slice(0, 4) !== anio) return false;
     if (tipo && m.tipo !== tipo) return false;
     if (cat && m.categoria !== cat) return false;
@@ -809,7 +884,7 @@ function openMovDialog(mov, preset = {}) {
   f.querySelector(`input[name="tipo"][value="${tipo}"]`).checked = true;
   f.importe.value = mov ? fmtInput(mov.importe) : '';
   // por defecto: hoy si estamos en el mes actual, si no el día 1 del mes seleccionado
-  f.fecha.value = mov?.fecha || (monthKey(todayISO()) === UI.mes ? todayISO() : UI.mes + '-01');
+  f.fecha.value = mov?.fecha || (enPeriodo(todayISO()) ? todayISO() : periodo().desde);
   fillCategoriaSelect(tipo, mov?.categoria);
   f.descripcion.value = mov?.descripcion || '';
   f.querySelector(`input[name="naturaleza"][value="${mov?.naturaleza || naturalezaPorDefecto(f.categoria.value)}"]`).checked = true;
@@ -1307,8 +1382,10 @@ $('#resetBtn').addEventListener('click', async () => {
 
 /* ---------- Eventos generales ---------- */
 $$('nav.tabs button').forEach(b => b.addEventListener('click', () => showView(b.dataset.view)));
-$('#prevMonth').addEventListener('click', () => setMes(addMonths(UI.mes, -1)));
-$('#nextMonth').addEventListener('click', () => setMes(addMonths(UI.mes, 1)));
+$('#prevMonth').addEventListener('click', () => setMes(addMonths(UI.mes, UI.periodo === 'anio' ? -12 : -1)));
+$('#nextMonth').addEventListener('click', () => setMes(addMonths(UI.mes, UI.periodo === 'anio' ? 12 : 1)));
+$$('input[name=periodoTipo]').forEach(r => r.addEventListener('change', e => { if (e.target.checked) setPeriodo(e.target.value); }));
+$('#yearInput').addEventListener('change', e => { if (/^\d{4}$/.test(e.target.value)) setMes(`${e.target.value}-${UI.mes.slice(5, 7)}`); });
 $('#monthInput').addEventListener('change', e => { if (/^\d{4}-\d{2}$/.test(e.target.value)) setMes(e.target.value); });
 $('#themeBtn').addEventListener('click', async () => {
   const order = ['auto', 'light', 'dark'], next = order[(order.indexOf(Store.state.ajustes.tema) + 1) % 3];

@@ -294,3 +294,18 @@ select.cuenta-sel{width:100%}
 .fin-cuotas-tabla{max-height:300px;overflow:auto;margin-bottom:8px}
 .tabla-cuotas-edit input{width:110px;padding:6px 8px}
 .tabla-cuotas-edit td,.tabla-cuotas-edit th{padding:4px 8px}
+/* v3.6: selector Mes/Año y «Saldo del mes» */
+.seg-xs label{padding:5px 9px;font-size:.82rem}
+.periodo-seg{margin-right:2px}
+#yearInput{width:auto;min-width:88px}
+.saldo-mes{width:100%}
+.saldo-mes td{padding:6px 4px}
+.saldo-mes .saldo-sub td{border-top:1px dashed var(--border);color:var(--muted)}
+.saldo-mes .saldo-fin td{border-top:2px solid var(--border);font-size:1.05rem}
+.saldo-mes .saldo-ini td{font-weight:600}
+.saldo-anual{margin-top:10px}
+.saldo-anual summary{cursor:pointer;font-weight:600;margin-bottom:6px}
+.small-table{font-size:.86rem}
+@media (max-width:600px){.small-table th,.small-table td{padding:5px 3px}.seg-xs label{padding:5px 7px}}
+#saldoAnualTabla a{color:var(--primary);text-decoration:none;font-weight:600;white-space:nowrap}
+@media (max-width:600px){#saldoAnualTabla th:nth-child(2),#saldoAnualTabla td:nth-child(2){display:none}}
