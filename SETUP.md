@@ -106,6 +106,12 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.7.0 (pestaña Previsión + corrección del saldo de la v3.6.1)
+
+- Sube **todos** los archivos, incluidos los dos nuevos **`js/prevision-core.js`** y **`js/prevision.js`** (en `sw.js`, `VERSION = 'finanzas-v3.7.0'`). No cambia nada en Google Cloud ni en el formato de tus datos: la previsión es un cálculo.
+- El gasto variable estimado de la Previsión se guarda solo en cada navegador (no en Drive).
+- Tests nuevos (`tests/prevision.test.js`, `tests/fixtures/datos-cuentas-recientes.js` y las comprobaciones locales `tests/*-real-check.js`), que no hace falta subir.
+
 ### Actualizar a la v3.6 (saldo del mes con arrastre y vista de año)
 
 - Sube **todos** los archivos (en `sw.js`, `VERSION = 'finanzas-v3.6.0'`). No cambia nada en Google Cloud ni en el formato de tus datos: el arrastre es un cálculo, no crea movimientos.
