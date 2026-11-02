@@ -351,3 +351,6 @@ select.cuenta-sel{width:100%}
 .saldo-mes .saldo-ahorro td:first-child{font-weight:600}
 .prev-aviso.prev-acaba{background:color-mix(in srgb,var(--danger) 12%,var(--card));border-color:color-mix(in srgb,var(--danger) 50%,var(--border));color:var(--text)}
 @media (max-width:600px){#nominaInput{max-width:46vw;font-size:.85rem}.sobrante-opciones label{flex:1 1 100%}}
+
+/* v3.8.1: desglose del Resultado (arrastre + ingresos − gastos) */
+.kpi .sub.kpi-desglose{font-size:.75rem;line-height:1.3}
