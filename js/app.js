@@ -622,21 +622,41 @@ function showView(v) {
   renderAll();
 }
 
+/** v3.8.1: desglose pequeño del Resultado: «Arrastre del periodo anterior +X · Ingresos +Y · Gastos −Z». */
+function desgloseResultado(res, s, P) {
+  const sg = v => v > 0.004 ? '+' + eur(v) : v < -0.004 ? '−' + eur(-v) : eur(0);
+  const partes = [`Ingresos ${sg(res.ingresos)}`, `Gastos ${sg(-res.gastos)}`];
+  if (!res.conArrastre) return partes.join(' · ') + (s && s.sinSaldo ? ' · sin arrastre (antes de tus cuentas)' : '');
+  let lbl = P.tipo === 'anio' ? 'Saldo a 1 ene' : P.tipo === 'nomina' ? (P.p.tipo === 'previo' ? 'Lo que tenías antes' : 'Arrastre del periodo anterior') : 'Arrastre del mes anterior';
+  if (s.empiezaAqui) lbl = 'Saldo de apertura de tus cuentas';
+  else if (P.tipo === 'nomina' && P.p.tipo === 'nomina') {
+    const est = (P.p.nominas.find(n => n.sobrante) || {}).sobrante;
+    if (est === 'traspasado') lbl += ' (lo que sobró lo pasaste a ahorro)';
+    else if (est === 'acumulado') lbl += ' (acumulado)';
+    else if (est === 'pendiente') lbl += ' (aún sin decidir)';
+  }
+  partes.unshift(`${lbl} ${sg(res.arrastre)}`);
+  if (Math.abs(res.previo) > 0.004) partes.push(`Antes de tus cuentas ${sg(res.previo)}`);
+  return partes.join(' · ');
+}
+
 function renderResumen() {
   const movs = Store.getMovimientos(), P = periodo(), esAnio = P.tipo === 'anio', esNom = P.tipo === 'nomina';
   const r = Calc.resumenMes(movs, P.clave);
   $('#resumenTitle').textContent = esAnio ? 'Resumen del año ' + P.label : esNom ? P.label : 'Resumen de ' + P.label;
   pintarVistaLink(P);
-  $('#kpiBalanceLabel').textContent = `Resultado del ${P.nombre} (ingresos − gastos)`;
+  $('#kpiBalanceLabel').textContent = `Resultado del ${P.nombre} (lo que te queda)`;
   $('#kpiIngresos').textContent = eur(r.ingresos);
   $('#kpiGastos').textContent = eur(r.gastos);
   $('#kpiIngresosN').textContent = `${r.nI} movimiento${r.nI === 1 ? '' : 's'}`;
   $('#kpiGastosN').textContent = `${r.nG} movimiento${r.nG === 1 ? '' : 's'}`;
-  const b = $('#kpiBalance'); b.textContent = eur(r.balance); b.className = 'value ' + (r.balance > 0 ? 'pos' : r.balance < 0 ? 'neg' : '');
-  const prevClave = esAnio ? String(Number(P.anio) - 1) : esNom ? (P.anterior ? { desde: P.anterior.desde, hasta: P.anterior.hasta } : null) : addMonths(UI.mes, -1);
-  const prev = prevClave ? Calc.resumenMes(movs, prevClave) : null;
-  $('#kpiBalanceSub').textContent = prev ? (esAnio ? 'Año anterior: ' : esNom ? 'Periodo anterior: ' : 'Mes anterior: ') + eur(prev.balance) : 'Es el primer periodo';
   const saldo = esAnio ? Calc.saldoAnio(P.anio) : esNom ? Calc.saldoRango(P.desde, P.hasta) : Calc.saldoMes(UI.mes);
+  // v3.8.1: RESULTADO = lo que te queda = arrastre (saldo inicial: lo que sobró y acumulaste) + ingresos − gastos
+  const res = PeriodosCore.resultado(saldo);
+  const b = $('#kpiBalance'); b.textContent = eur(res.resultado); b.className = 'value ' + (res.resultado > 0.004 ? 'pos' : res.resultado < -0.004 ? 'neg' : '');
+  $('#kpiBalanceDesglose').textContent = desgloseResultado(res, saldo, P);
+  const prevSaldo = esAnio ? Calc.saldoAnio(String(Number(P.anio) - 1)) : esNom ? (P.anterior ? Calc.saldoRango(P.anterior.desde, P.anterior.hasta) : null) : Calc.saldoMes(addMonths(UI.mes, -1));
+  $('#kpiBalanceSub').textContent = prevSaldo ? (esAnio ? 'Año anterior: ' : esNom ? 'Periodo anterior: ' : 'Mes anterior: ') + eur(PeriodosCore.resultado(prevSaldo).resultado) : 'Es el primer periodo';
   // v3.8: AHORRO = solo lo que pasas (neto) de tus cuentas del día a día a tus cuentas de ahorro/inversión
   const ah = PeriodosCore.ahorro(saldo, r.ingresos);
   const a = $('#kpiAhorro'); a.textContent = eur(ah.ahorrado); a.className = 'value ' + (ah.ahorrado > 0 ? 'pos' : ah.ahorrado < 0 ? 'neg' : '');
@@ -683,6 +703,7 @@ function renderResumen() {
 /** v3.6: «Saldo del mes» (o del año) con arrastre: saldo inicial + resultado ± traspasos = saldo final.
     v3.6.1: con cuentas, el saldo empieza en la fecha de apertura de tus cuentas del día a día; antes, solo resultado. */
 function renderSaldoMes(s, P) {
+  const res = PeriodosCore.resultado(s);
   const esAnio = P.tipo === 'anio', esNom = P.tipo === 'nomina', hoy = todayISO();
   const inicioTxt = s.inicioCuentas ? fmtFecha(s.inicioCuentas) : '';
   const finLbl = esAnio ? (P.anio === hoy.slice(0, 4) ? `Saldo final del año (a 31 dic, con lo apuntado hasta hoy)` : `Saldo final a 31 dic ${P.anio}`)
@@ -716,7 +737,7 @@ function renderSaldoMes(s, P) {
     $('#saldoMesBody').innerHTML = `<div class="table-wrap"><table class="saldo-mes" id="saldoMesTabla"><tbody>
     ${linea('+ Ingresos', s.ingresos, '', 'ingresos')}
     ${linea('− Gastos', -s.gastos, '', 'gastos')}
-    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
+    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos; sin arrastre: antes de tus cuentas)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
   </tbody></table></div><p class="saldo-vacio" id="saldoMesSinSaldo">Sin saldo: tus cuentas empiezan el ${inicioTxt}.</p>${tabla}<p class="muted small" id="saldoMesNota">${invTxt ? invTxt.trim() + ' ' : ''}El saldo del ${P.nombre} (lo que sobra y pasa al siguiente) se calcula desde el ${inicioTxt}, cuando empiezan tus cuentas del día a día; antes no hay saldo que arrastrar. Si quieres verlo antes, cambia en Cuentas la fecha y el saldo inicial de tu cuenta a esa fecha.</p>`;
   } else {
     nota = (invTxt ? invTxt.trim() + ' ' : '') + nota;
@@ -724,8 +745,8 @@ function renderSaldoMes(s, P) {
     ${linea(iniLbl, s.saldoInicial, 'saldo-ini', 'inicial')}
     ${linea('+ Ingresos', s.ingresos, '', 'ingresos')}
     ${linea('− Gastos', -s.gastos, '', 'gastos')}
-    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(ingresos − gastos)</span></td><td class="num ${s.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(s.resultado)}</td></tr>
     ${opc(`Ingresos/gastos anteriores al ${inicioTxt} <span class="muted small">(antes de tus cuentas: no cuentan en el saldo)</span>`, s.previo, 'previo')}
+    <tr class="saldo-sub"><td>= Resultado del ${P.nombre} <span class="muted small">(lo que te queda: ${esAnio ? 'saldo a 1 ene' : 'arrastre'} + ingresos − gastos)</span></td><td class="num ${res.resultado >= 0 ? 'pos' : 'neg'}" data-saldo-val="resultado">${eur(res.resultado)}</td></tr>
     ${linea('Ahorrado <span class="muted small">(lo que pasaste a tus cuentas de ahorro/inversión, neto)</span>', s.traspasos, 'saldo-ahorro', 'traspasos')}
     ${opc('Compras/ventas de inversión pagadas desde estas cuentas', s.inversion, 'inversion')}
     ${opc('Ingresos/gastos apuntados en cuentas de ahorro/inversión', s.fuera, 'fuera')}
@@ -771,7 +792,8 @@ function renderCharts(cats, P = periodo()) {
     datasets: [
       { type: 'bar', label: 'Ingresos', data: serie.map(s => s.ingresos), backgroundColor: cssVar('--ok'), borderRadius: 4 },
       { type: 'bar', label: 'Gastos', data: serie.map(s => s.gastos), backgroundColor: cssVar('--danger'), borderRadius: 4 },
-      { type: 'line', label: 'Resultado', data: serie.map(s => s.balance), borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 },
+      { type: 'line', label: 'Resultado', data: saldosSerie.map((s, i) => s.sinSaldo ? serie[i].balance : PeriodosCore.resultado(s).resultado),   // v3.8.1: con arrastre
+        borderColor: cssVar('--primary'), backgroundColor: cssVar('--primary'), tension: .3, pointRadius: 3 },
       { type: 'line', label: 'Saldo final', data: saldosSerie.map(s => s.saldoFinal), spanGaps: false, borderColor: cssVar('--warn') || '#d97706', backgroundColor: cssVar('--warn') || '#d97706', borderDash: [6, 4], tension: .3, pointRadius: 3 },
       { type: 'line', label: 'Ahorrado', data: saldosSerie.map(s => PeriodosCore.ahorro(s, 0).ahorrado), borderColor: '#8b5cf6', backgroundColor: '#8b5cf6', tension: .3, pointRadius: 3, hidden: saldosSerie.every(s => !PeriodosCore.ahorro(s, 0).ahorrado) }
     ]

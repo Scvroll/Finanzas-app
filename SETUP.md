@@ -106,6 +106,15 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.8.1 (el Resultado cuenta lo que arrastras del periodo anterior)
+
+- Sube los archivos cambiados: `index.html`, `css/styles.css`, `js/app.js`, `js/periodos-core.js`, `js/config.js`, `sw.js`, `README.md`, `SETUP.md` (en `sw.js`, `VERSION = 'finanzas-v3.8.1'`). No cambia nada en Google Cloud ni en los datos.
+- **Resultado del periodo** = lo que te queda = **arrastre + ingresos − gastos**, con un desglose debajo («Arrastre del periodo anterior +X · Ingresos +Y · Gastos −Z»).
+  - Si lo que sobró lo **acumulaste** (o aún no has decidido), se suma. Si lo **traspasaste a ahorro**, ya no está en tus cuentas y no se suma: el resultado puede salir negativo. Si traspasaste solo una parte, se suma el resto.
+  - Por mes natural, el arrastre es el saldo inicial del mes; en la vista del año, el saldo a 1 de enero. Antes de que empiecen tus cuentas no hay arrastre (solo ingresos − gastos).
+  - Los traspasos a ahorro hechos durante el periodo no restan del resultado: se ven en «Ahorrado» y en el saldo final.
+- Previsión no cambia: su «Saldo inicial (lo que sobra del periodo anterior)» y su «Sobrante previsto» ya incluían el arrastre.
+
 ### Actualizar a la v3.8.0 (periodo de nómina, ahorro = traspasos y qué hacer con lo que sobra)
 
 - Sube **todos** los archivos, incluidos los dos nuevos **`js/periodos-core.js`** y **`js/periodos.js`** (en `sw.js`, `VERSION = 'finanzas-v3.8.0'`). No cambia nada en Google Cloud.

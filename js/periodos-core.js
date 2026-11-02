@@ -74,7 +74,20 @@
     return { ahorrado, tasa: ingresos > 0 ? ahorrado / ingresos : null };
   }
 
-  const api = { periodos, periodoEn, periodoDeMes, ahorro, rango, nombreNomina, esNomina, MESES, MES3 };
+  /** v3.8.1: RESULTADO = lo que te queda = saldo arrastrado (saldo inicial del periodo) + ingresos − gastos.
+      `saldo`: objeto de CuentasCore.saldoPeriodo/saldosRangos/saldoMes/saldoAnio. Si acumulaste lo que sobró, está en el
+      saldo inicial; si lo traspasaste a ahorro (traspaso de cierre, cuenta el día antes), ya no está y el resultado puede
+      salir negativo. Sin saldo (antes de tus cuentas): solo ingresos − gastos. `previo` (ingresos/gastos anteriores al
+      inicio de tus cuentas dentro del periodo) se descuenta porque ya está en el saldo real de apertura. Todo en céntimos. */
+  function resultado(saldo) {
+    const c = n => { const v = Number(n) || 0; return Math.round(v * 100 + (v >= 0 ? 1e-7 : -1e-7)); };
+    const s = saldo || {}, conArrastre = !s.sinSaldo && s.saldoInicial !== null && s.saldoInicial !== undefined;
+    const arr = conArrastre ? c(s.saldoInicial) : 0, ing = c(s.ingresos), gas = c(s.gastos), prev = conArrastre ? c(s.previo) : 0;
+    return { conArrastre, arrastre: arr / 100, ingresos: ing / 100, gastos: gas / 100, previo: prev / 100,
+      ingresosMenosGastos: (ing - gas) / 100, resultado: (arr + ing - gas + prev) / 100 };
+  }
+
+  const api = { periodos, periodoEn, periodoDeMes, ahorro, resultado, rango, nombreNomina, esNomina, MESES, MES3 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PeriodosCore = api;
 })(typeof self !== 'undefined' ? self : globalThis);
