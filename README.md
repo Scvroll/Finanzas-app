@@ -36,6 +36,7 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 - **Previsión (v3.7):** pestaña que responde «¿cuánto me sobrará (o faltará)?» este mes y los 6 (o 12) siguientes. Por mes: saldo inicial (hoy, el real de tus cuentas del día a día; después, lo que sobra del mes anterior) + ingresos recurrentes + nómina − gastos fijos recurrentes − cuotas de deudas sin pagar (de los dos modos; las vencidas sin marcar van al mes actual) − gasto variable estimado = lo que sobra.
 - **Periodo de nómina (v3.8):** si tienes nóminas, el Resumen, el saldo, los gráficos, las categorías y la Previsión se ven por periodo de nómina, de una nómina al día antes de la siguiente (p. ej. «Nómina de octubre (28 oct – 27 nov)»; lo anterior a la primera nómina sale como «Antes de la primera nómina»). **Ahorrado** = lo que traspasas (neto) a tus cuentas de ahorro/inversión; tasa de ahorro = ahorrado / ingresos. Al apuntar una nómina nueva, la app pregunta qué hacer con lo que sobró: traspasarlo a una cuenta de ahorro (cuenta como ahorro del periodo que se cierra), acumularlo al nuevo periodo o decidir más tarde. La Previsión avisa en rojo si el dinero se acaba antes de la siguiente nómina. Ajustes → «Vista por» para elegir mes natural o periodo de nómina.
 - **Resultado = lo que te queda (v3.8.1):** arrastre (lo que sobró del periodo anterior y acumulaste; en el año, el saldo a 1 de enero) + ingresos − gastos, con su desglose. Si lo que sobró lo traspasaste a ahorro no se suma y el resultado puede salir negativo.
+- **Planificación (v3.9):** en Previsión → Planificación, pon presupuestos por categoría (p. ej. Combustible 200 € por periodo: en la previsión cuenta como gasto fijo, y en el Resumen ves lo que te queda o cuánto te has pasado) e ingresos previstos (pagas extra en junio y diciembre, productividad estimada en mayo que puedes dejar fuera, ingresos de una sola vez). Todo se puede editar. Cuando apuntas el ingreso real, la Previsión usa el importe real en lugar del previsto. Una nómina recurrente puede cobrarse otro día en un mes concreto (p. ej. diciembre el 22). La Previsión muestra 13 periodos por defecto (o 7 o 25).
   - En el mes actual solo cuenta lo **pendiente** (lo ya apuntado o pagado ya está en el saldo de hoy).
   - **Nómina:** si no la tienes como recurrente, se **estima** con la última (importe y día) y se marca «Estimada»; el botón «Guardar como nómina recurrente» la convierte en recurrente.
   - **Gasto variable estimado:** editable (se guarda en este navegador); vacío = media de los últimos meses completos (hasta 3). En el mes actual se resta solo lo que falta por gastar.
@@ -140,6 +141,8 @@ y abre <http://localhost:8000>. (Con doble clic en `index.html` solo funciona el
 | `js/prevision-core.js` | Cálculo de la Previsión sin dependencias (probado con tests) |
 | `js/prevision.js` | Pestaña Previsión |
 | `js/periodos-core.js` | Periodos de nómina y ahorro, sin dependencias (probado con tests) |
+| `js/plan-core.js` | Presupuestos e ingresos previstos: cuándo tocan, cuánto se ha gastado y si ya se cobraron, sin dependencias (probado con tests) |
+| `js/plan.js` | Tarjeta Planificación (Previsión) y Presupuestos del periodo (Resumen) |
 | `js/periodos.js` | Diálogo «¿qué hago con lo que sobra?» al entrar una nómina |
 | `js/cuentas.js` | Pestaña Cuentas, traspasos, ajustes, asignar cuenta y traspasos entre fondos |
 | `js/vehiculos.js` | Pestaña Vehículos, diálogo de vehículo y opción ⛽ del diálogo de movimiento |
@@ -224,12 +227,12 @@ node tests/finance.test.js          # cálculos: cuota, TAE, FIFO, recurrentes, 
 node tests/sync.test.js             # sincronización con Drive simulado (dos dispositivos, sin conexión, versiones antiguas)
 node tests/cuentas.test.js          # cuentas: saldos, traspasos, ajustes, dinero invertido, traspasos entre fondos, copia para análisis
 node tests/saldo-mes.test.js        # v3.6: saldo del mes con arrastre (con y sin cuentas) y vista de año
-node tests/periodos.test.js         # v3.8: periodos de nómina, ahorro = traspasos, previsión por periodos
+node tests/periodos.test.js         # v3.8: periodos de nómina, ahorro = traspasos, previsión por periodos (v3.9: día especial de la nómina)
 node tests/prevision.test.js        # v3.7: previsión (pendientes del mes, nómina estimada, cuotas, gasto variable, avisos, céntimos)
 
 # Comprobaciones LOCALES opcionales con tu «copia para análisis» (no se incluyen datos en los tests):
 node tests/datos-reales-check.js /ruta/finanzas-analisis.json                       # saldo del mes (v3.6.1) y periodos de nómina (v3.8)
-node tests/prevision-real-check.js /ruta/finanzas-analisis.json [hoy] [meses] [variable] [nomina]   # previsión (v3.7; «nomina» = por periodos, v3.8)
+node tests/prevision-real-check.js /ruta/finanzas-analisis.json [hoy] [meses] [variable] [nomina] [previstos-json]   # previsión (v3.7; «nomina» = por periodos, v3.8; previstos, v3.9)
 
 # Tests de navegador (necesitan Google Chrome y playwright-core: npm i playwright-core)
 python3 -m http.server 8765 &       # desde la carpeta finanzas-app

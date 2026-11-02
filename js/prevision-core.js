@@ -6,25 +6,34 @@
              − cuotas de deudas sin pagar de ese mes (las vencidas sin marcar se suman al mes actual)
              − gasto variable estimado (editable; por defecto, la media de los últimos meses completos)
              = lo que te sobra (o falta) al acabar el mes, que pasa al siguiente.
-   En el mes actual solo cuenta lo que queda pendiente (lo ya apuntado o pagado está en el saldo de hoy). */
+   En el mes actual solo cuenta lo que queda pendiente (lo ya apuntado o pagado está en el saldo de hoy).
+   v3.9 (planificación, colección «previstos», ver plan-core.js):
+   - Presupuestos por categoría (p. ej. Combustible 200 € por nómina): cuentan como gasto fijo en cada periodo; en el actual,
+     solo lo que queda (presupuesto − lo ya gastado de esa categoría). Para no contarlo dos veces, los recurrentes de esa
+     categoría no se suman aparte y esa categoría no entra en la media del gasto variable.
+   - Ingresos previstos (pagas extra, productividad, ingresos puntuales): se suman el mes que tocan (con la nómina o el día
+     indicado). Si ya hay un ingreso real que los cumple (enlazado o de su categoría ese mes), se usa el real y no el previsto.
+   - Día especial de un recurrente en un mes (p. ej. la nómina de diciembre el 22): ese periodo empieza antes y es más largo. */
 (function (root) {
   'use strict';
   const FC = typeof module !== 'undefined' && module.exports ? require('./finance-core.js') : root.FinanceCore;
+  const PL = typeof module !== 'undefined' && module.exports ? require('./plan-core.js') : root.PlanCore;
   const cent = n => Math.round((Number(n) || 0) * 100 + (Number(n) >= 0 ? 1e-7 : -1e-7));
   const eurDe = c => c / 100;
   const dim = ym => FC.daysInMonth(+ym.slice(0, 4), +ym.slice(5, 7));
   const vivo = x => x && !x.deleted;
 
   /** Gasto variable de un mes (gastos «variable» que no son cuotas de deuda ni compras financiadas). */
-  const variableDe = (movs, ym) => movs.filter(m => vivo(m) && m.tipo === 'gasto' && m.naturaleza === 'variable' && !m.deudaId && !m.financiadoPor && String(m.fecha).startsWith(ym))
+  const variableDe = (movs, ym, excluir = null) => movs.filter(m => vivo(m) && m.tipo === 'gasto' && m.naturaleza === 'variable' && !m.deudaId && !m.financiadoPor && String(m.fecha).startsWith(ym) && !(excluir && excluir.has(m.categoria)))
     .reduce((s, m) => s + cent(m.importe), 0);
 
   /** Media del gasto variable de los últimos `n` meses completos (anteriores al actual) que tienen movimientos. 0 si no hay. */
-  function gastoVariableMedio(movimientos, hoy, n = 3) {
+  /** `excluir` (v3.9): categorías con presupuesto, que ya se cuentan aparte. */
+  function gastoVariableMedio(movimientos, hoy, n = 3, excluir = null) {
     const ym0 = hoy.slice(0, 7), movs = (movimientos || []).filter(vivo);
     const meses = [...new Set(movs.map(m => String(m.fecha).slice(0, 7)))].filter(ym => ym < ym0).sort().slice(-n);
     if (!meses.length) return { importe: 0, meses: [] };
-    return { importe: eurDe(Math.round(meses.reduce((s, ym) => s + variableDe(movs, ym), 0) / meses.length)), meses };
+    return { importe: eurDe(Math.round(meses.reduce((s, ym) => s + variableDe(movs, ym, excluir), 0) / meses.length)), meses };
   }
 
   /** Nómina estimada (si no hay una nómina recurrente activa): importe y día de la última nómina apuntada (de los últimos 3 meses). */
@@ -42,7 +51,7 @@
   /** Día de la nómina esperado: el de la nómina recurrente activa o, si no hay, el de la estimada. */
   function diaNomina(recurrentes, nomEst, ym0) {
     const r = (recurrentes || []).find(r => vivo(r) && r.activo !== false && r.tipo === 'ingreso' && r.tipoIngreso === 'nomina' && (!r.hasta || r.hasta >= ym0));
-    if (r) return { fechaEn: ym => FC.fechaCobroEnMes(ym, FC.normalizarDiaCobro(r.dia, null, 1)) };
+    if (r) return { fechaEn: ym => FC.fechaRecurrenteEn(r, ym), recurrente: r };   // v3.9: con el día especial de ese mes (diasMes)
     if (nomEst) return { fechaEn: ym => FC.fechaEnMes(ym, nomEst.dia) };
     return null;
   }
@@ -80,10 +89,12 @@
    * - esLiquido(m): opcional; si un movimiento apuntado con fecha futura no es de una cuenta del día a día, no cuenta.
    * - porNomina (v3.8): por periodos de nómina (de nómina a nómina) en vez de meses naturales. Si no hay nómina
    *   (ni recurrente ni una reciente para estimarla), se usan meses naturales (resultado.modo = 'mes').
+   * - previstos (v3.9): presupuestos e ingresos previstos (colección «previstos»).
    */
-  function prevision({ hoy, saldoHoy = 0, movimientos = [], recurrentes = [], deudas = [], meses = 7, gastoVariable = null, esLiquido = null, porNomina = false }) {
+  function prevision({ hoy, saldoHoy = 0, movimientos = [], recurrentes = [], deudas = [], meses = 7, gastoVariable = null, esLiquido = null, porNomina = false, previstos = [] }) {
     const ym0 = hoy.slice(0, 7), movs = movimientos.filter(vivo), n = Math.max(1, meses | 0);
-    const auto = gastoVariableMedio(movs, hoy);
+    const pres = PL.presupuestos(previstos), catPres = new Set(pres.map(p => p.categoria));
+    const auto = gastoVariableMedio(movs, hoy, 3, catPres);
     const varMes = gastoVariable === null || gastoVariable === undefined || gastoVariable === '' || !isFinite(Number(gastoVariable)) ? auto.importe : Math.max(0, Number(gastoVariable));
     const nomEst = nominaEstimada(movs, recurrentes, hoy);
     let lista = porNomina ? periodosPrevistos(movs, recurrentes, nomEst, hoy, n) : null;
@@ -100,12 +111,14 @@
     const fechaNomina = fecha => (modo === 'nomina' && retrasada && fecha < hoy && fecha.slice(0, 7) === retrasada.nominaEsperada.slice(0, 7) ? retrasada.nominaRetrasada : fecha);
 
     // 1) Recurrentes (ingresos y gastos)
+    const enPresupuesto = [];
     for (const r of recurrentes) {
       if (!vivo(r) || r.activo === false || !/^\d{4}-\d{2}$/.test(r.desde || '')) continue;
+      if (r.tipo === 'gasto' && catPres.has(r.categoria)) { enPresupuesto.push(r.id); continue; }   // v3.9: ya lo cubre el presupuesto de su categoría
       const esNom = r.tipo === 'ingreso' && r.tipoIngreso === 'nomina';
       for (const ym of mesesGen) {
         if (ym < r.desde || (r.hasta && ym > r.hasta)) continue;
-        let fecha = FC.fechaCobroEnMes(ym, FC.normalizarDiaCobro(r.dia, null, 1));
+        let fecha = FC.fechaRecurrenteEn(r, ym);   // v3.9: con el día especial de ese mes
         const apuntado = enMes(ym, m => m.id === FC.idRecurrente(r.id, ym) || m.recurrenteId === r.id);
         if (apuntado) continue;            // ya está en el saldo (o, si es futuro, entra abajo como apuntado)
         if (esNom) fecha = fechaNomina(fecha);
@@ -119,6 +132,21 @@
       const fecha = fechaNomina(FC.fechaEnMes(ym, nomEst.dia));
       if (fecha < hoy) continue;
       add(fecha, { tipo: 'ingreso', concepto: 'Nómina (estimada)', importe: nomEst.importe, origen: 'nomina-estimada', estimado: true, nomina: true });
+    }
+    // 2b) v3.9: ingresos previstos (pagas extra, productividad, puntuales). Si ya hay un ingreso real que los cumple, cuenta el real.
+    const dn = diaNomina(recurrentes, nomEst, ym0), cumplidos = [], excluidos = [];
+    for (const pv of PL.ingresos(previstos)) {
+      for (const ym of mesesGen) {
+        if (!PL.tocaEn(pv, ym)) continue;
+        let fecha = pv.conNomina ? (dn ? dn.fechaEn(ym) : FC.fechaEnMes(ym, dim(ym))) : FC.fechaCobroEnMes(ym, FC.normalizarDiaCobro(pv.dia, null, 1));
+        const real = PL.cobrado(pv, ym, movs, fecha);
+        if (real) { cumplidos.push({ id: pv.id, mes: ym, previsto: FC.round2(pv.importe), real: real.importe, enlazado: real.enlazado }); continue; }   // el real ya está en el saldo o apuntado
+        if (pv.conNomina) fecha = fechaNomina(fecha);
+        let pendiente = false;
+        if (fecha < hoy) { if (fecha < P0.desde) continue; fecha = hoy; pendiente = true; }   // tocaba en este periodo y aún no está apuntado: se espera
+        if (pv.incluir === false) { if (periodoDe(fecha)) excluidos.push({ id: pv.id, mes: ym, fecha, concepto: pv.descripcion || pv.categoria, importe: FC.round2(pv.importe) }); continue; }
+        add(fecha, { tipo: 'ingreso', concepto: (pv.descripcion || pv.categoria || 'Ingreso previsto') + (pendiente ? ' (pendiente de cobrar)' : ''), importe: pv.importe, origen: 'previsto', id: pv.id, estimado: !!pv.estimado, previsto: true });
+      }
     }
     // 3) Cuotas de deudas sin pagar (las dos formas: cuadro calculado y cuota manual)
     for (const d of deudas) {
@@ -144,8 +172,12 @@
       const sum = t => items.filter(x => x.tipo === t).reduce((s, x) => s + x.c, 0);
       const ing = sum('ingreso'), fij = sum('fijo'), cuo = sum('cuota');
       const inicioTramo = p.actual ? hoy : p.desde;
-      const yaVar = p.actual ? variableDe(movs.filter(m => m.fecha <= hoy && m.fecha >= p.desde), '') : 0;
-      const va = Math.max(0, cent(varMes) - yaVar);   // en el periodo actual, solo lo que falta por gastar
+      const yaVar = p.actual ? variableDe(movs.filter(m => m.fecha <= hoy && m.fecha >= p.desde), '', catPres) : 0;
+      const vaVar = Math.max(0, cent(varMes) - yaVar);   // en el periodo actual, solo lo que falta por gastar
+      // v3.9: presupuestos: lo que queda de cada uno en el periodo (lo gastado ya está en el saldo o apuntado arriba)
+      const presDet = pres.map(pr => ({ ...PL.estado(pr, movs, p.desde, p.hasta) }));
+      const pre = presDet.reduce((s, x) => s + cent(x.queda), 0);
+      const va = vaVar + pre;   // se reparte por igual en los días del periodo, como el variable
       const fin = ini + ing - fij - cuo - va;
       // ¿Baja de 0 dentro del periodo? Gasto variable repartido por igual en los días que quedan.
       // Cada día con movimientos: se mira el saldo antes de nada (con el variable hasta ese día), luego entran los cobros y salen los pagos del día.
@@ -168,12 +200,15 @@
       mirar(fin, p.hasta, true);
       const cobroDespues = min.c < 0 && items.find(x => x.tipo === 'ingreso' && x.fecha >= min.fecha && !(x.fecha === min.fecha && min.despues));
       const r = {
-        mes: p.mes, clave: p.clave, desde: p.desde, hasta: p.hasta, actual: p.actual, saldoInicial: eurDe(ini), ingresos: eurDe(ing), fijos: eurDe(fij), cuotas: eurDe(cuo), variable: eurDe(va), variableYaGastado: eurDe(yaVar),
+        mes: p.mes, clave: p.clave, desde: p.desde, hasta: p.hasta, actual: p.actual, saldoInicial: eurDe(ini), ingresos: eurDe(ing), fijos: eurDe(fij), cuotas: eurDe(cuo), variable: eurDe(vaVar), variableYaGastado: eurDe(yaVar),
+        presupuestos: eurDe(pre), presupuestosDet: presDet,
         sobra: eurDe(fin), falta: fin < 0 ? eurDe(-fin) : 0, items: items.map(({ c, ...x }) => x),
         minimo: eurDe(min.c), fechaMinimo: min.fecha,
         avisoAntesDeCobrar: min.c < 0 && fin >= 0 && cobroDespues ? { fecha: min.fecha, importe: eurDe(min.c), cobro: cobroDespues.fecha, concepto: cobroDespues.concepto } : null,
         avisoDentroMes: min.c < 0 && fin >= 0 && !cobroDespues ? { fecha: min.fecha, importe: eurDe(min.c) } : null,
-        nominaEstimada: items.some(x => x.origen === 'nomina-estimada')
+        nominaEstimada: items.some(x => x.origen === 'nomina-estimada'),
+        excluidos: excluidos.filter(x => p.desde <= x.fecha && x.fecha <= p.hasta),
+        dias: FC.diffDays(p.desde, p.hasta) + 1
       };
       if (modo === 'nomina') {
         Object.assign(r, { nombre: p.nombre, rango: p.rango, siguienteNomina: p.siguienteNomina, avisoAntesDeCobrar: null, avisoDentroMes: null,
@@ -184,7 +219,7 @@
       ini = fin;
       return r;
     });
-    return { hoy, modo, meses: out, gastoVariable: varMes, gastoVariableAuto: auto, nominaEstimada: nomEst };
+    return { hoy, modo, meses: out, gastoVariable: varMes, gastoVariableAuto: auto, nominaEstimada: nomEst, presupuestos: pres, recurrentesEnPresupuesto: enPresupuesto, cumplidos };
   }
 
   const api = { prevision, gastoVariableMedio, nominaEstimada, periodosPrevistos };

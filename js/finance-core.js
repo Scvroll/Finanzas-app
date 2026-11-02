@@ -401,6 +401,13 @@
 
   /* ---------------- Movimientos recurrentes ---------------- */
   const idRecurrente = (plantillaId, ym) => `rec_${plantillaId}_${ym}`;
+  /** v3.9: día de cobro de una plantilla en el mes `ym`: el normal (`dia`) o el que pusiste para ese mes del año
+      en `diasMes` ({ 12: 22 } = cada diciembre el día 22; vale 1–31 o 'ultimo'). */
+  function diaRecurrenteEn(rec, ym) {
+    const ex = rec && rec.diasMes && rec.diasMes[+ym.slice(5, 7)];
+    return normalizarDiaCobro(ex !== undefined && ex !== null && ex !== '' ? ex : rec && rec.dia, null, 1);
+  }
+  const fechaRecurrenteEn = (rec, ym) => fechaCobroEnMes(ym, diaRecurrenteEn(rec, ym));
   /**
    * Meses que tocan para una plantilla, hasta hoy (incluido) y como mucho `maxMeses` hacia atrás.
    * Cada uno lleva su id determinista y un updatedAt determinista (medianoche UTC de su fecha):
@@ -414,7 +421,7 @@
     const fin = rec.hasta && rec.hasta < hoyYm ? rec.hasta : hoyYm;
     const out = [];
     for (; ym <= fin; ym = ymAdd(ym, 1)) {
-      const fecha = fechaCobroEnMes(ym, normalizarDiaCobro(rec.dia, null, 1));
+      const fecha = fechaRecurrenteEn(rec, ym);   // v3.9: con el día especial de ese mes, si lo hay
       if (fecha > hoy) break;
       out.push({ id: idRecurrente(rec.id, ym), periodo: ym, fecha, updatedAt: toUTC(fecha) });
     }
@@ -627,7 +634,7 @@
     DIA_ULTIMO, normalizarDiaCobro, fechaCobroEnMes, fechaCuota, textoDiaCobro,
     cuotaFrancesa, cuadroAmortizacion, cuadroFrances, cuadroManual, esManual, importeCuotaManual, pagosManual, tinImplicito, compatManual, tir, calcularTAE, resumenDeuda,
     fifo, carteraFIFO, erroresNuevos, cuadreTraspasoFondos, ordenarOperaciones, ultimoPrecio, metricasActivo, metricasCartera, disponibleEn, disponibleActivo,
-    idRecurrente, periodosRecurrente, generarRecurrentes,
+    idRecurrente, periodosRecurrente, generarRecurrentes, diaRecurrenteEn, fechaRecurrenteEn,
     GARANTIA_ANIOS_DEFECTO, vencimientoGarantia, estadoGarantia, urlGoogleCalendar,
     parseNumeroES, importesEn, fechasEn, detectarTipoDocumento, analizarTexto,
     CSV_COLUMNAS, PLANTILLA_CSV, parseCSVOperaciones, parseFechaFlexible, migrarInversionV2
