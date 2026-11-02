@@ -247,8 +247,24 @@ function openRecDialog(r) {
   f.dia.value = String(r?.dia || Number(todayISO().slice(8))); f.desde.value = r?.desde || monthKey(todayISO()); f.hasta.value = r?.hasta || '';
   f.querySelector(`input[name="naturaleza"][value="${r?.naturaleza || 'fijo'}"]`).checked = true; f.tipoIngreso.value = r?.tipoIngreso || 'nomina';
   f.activo.checked = r ? r.activo : true;
+  $('#recDiasMes').innerHTML = ''; Object.entries(r?.diasMes || {}).forEach(([m, d]) => recDiaMesFila(m, d));   // v3.9
   $('#recDialogTitle').textContent = r ? 'Editar movimiento recurrente' : 'Nuevo movimiento recurrente';
   $('#recDialog').showModal();
+}
+/** v3.9: fila «Día distinto en un mes»: mes del año + día (vale para ese mes todos los años). */
+function recDiaMesFila(mes = 12, dia = 22) {
+  const div = document.createElement('div'); div.className = 'rec-diames';
+  div.innerHTML = `<select data-dm-mes aria-label="Mes">${PlanCore.MESES.map((n, i) => `<option value="${i + 1}">${n[0].toUpperCase() + n.slice(1)}</option>`).join('')}</select>
+    <select data-dm-dia aria-label="Día">${opcionesDiaCobro()}</select><button type="button" class="btn-sm" data-dm-quitar title="Quitar">✕</button>`;
+  div.querySelector('[data-dm-mes]').value = String(mes); div.querySelector('[data-dm-dia]').value = String(dia);
+  $('#recDiasMes').appendChild(div);
+}
+$('#recDiasMesAdd').addEventListener('click', () => recDiaMesFila());
+$('#recDiasMes').addEventListener('click', e => { const b = e.target.closest('[data-dm-quitar]'); if (b) b.parentElement.remove(); });
+function leerDiasMes() {
+  const o = {};
+  $$('#recDiasMes .rec-diames').forEach(div => { const d = leerDiaCobro(div.querySelector('[data-dm-dia]').value); if (d === FC.DIA_ULTIMO || d >= 1) o[Number(div.querySelector('[data-dm-mes]').value)] = d; });
+  return Object.keys(o).length ? o : null;
 }
 $$('#recForm input[name="tipo"]').forEach(x => x.addEventListener('change', () => recSyncTipo()));
 $('#recForm').addEventListener('submit', async e => {
@@ -261,7 +277,10 @@ $('#recForm').addEventListener('submit', async e => {
   if (f.hasta.value && f.hasta.value < f.desde.value) return err('«Hasta» no puede ser anterior a «Desde».');
   const t = recTipo(), viejo = Store.get('recurrentes', f.id.value);
   if (!viejo && f.desde.value < monthKey(todayISO()) && !confirm(`Se crearán también los movimientos de los meses pasados desde ${monthLabel(f.desde.value)}. ¿Continuar?`)) return;
-  await Store.put('recurrentes', ponerCuenta({ ...(viejo || {}), id: f.id.value || null, tipo: t, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), dia, desde: f.desde.value, hasta: f.hasta.value, activo: f.activo.checked, naturaleza: f.querySelector('input[name="naturaleza"]:checked').value, tipoIngreso: f.tipoIngreso.value }, f.cuenta));
+  const diasMes = leerDiasMes();
+  const rec = ponerCuenta({ ...(viejo || {}), id: f.id.value || null, tipo: t, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), dia, desde: f.desde.value, hasta: f.hasta.value, activo: f.activo.checked, naturaleza: f.querySelector('input[name="naturaleza"]:checked').value, tipoIngreso: f.tipoIngreso.value }, f.cuenta);
+  delete rec.diasMes; if (diasMes) rec.diasMes = diasMes;
+  await Store.put('recurrentes', rec);
   $('#recDialog').close(); toast(viejo ? 'Recurrente actualizado (se aplica a los próximos meses)' : 'Recurrente creado');
 });
 $('#addRecBtn').addEventListener('click', () => openRecDialog());

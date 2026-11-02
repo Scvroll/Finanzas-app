@@ -89,6 +89,16 @@ function modoManual(d) {
   }
   return { modo: 'manual', cuotaManual: cuota, cuotasEditadas: ed, capitalConocido: d.capitalConocido === true, tinConocido: d.capitalConocido === true && d.tinConocido === true };
 }
+/** v3.9: { mes (1–12): día (1–31 | 'ultimo') } o null si no hay ninguno válido. */
+function diasMesNorm(dm) {
+  if (!dm || typeof dm !== 'object') return null;
+  const o = {};
+  for (const [k, v] of Object.entries(dm)) {
+    const mes = Number(k); if (!Number.isInteger(mes) || mes < 1 || mes > 12) continue;
+    if (v === FC.DIA_ULTIMO) o[mes] = FC.DIA_ULTIMO; else if (num(v) >= 1) o[mes] = Math.min(31, Math.round(num(v)));
+  }
+  return Object.keys(o).length ? o : null;
+}
 const NORMALIZAR = {
   movimientos(m) {
     if (!m.fecha || !isFinite(Number(m.importe))) return null;
@@ -109,6 +119,7 @@ const NORMALIZAR = {
       if (mov.tipoIngreso === 'nomina' && ['pendiente', 'traspasado', 'acumulado'].includes(m.sobrante)) mov.sobrante = m.sobrante;
     }
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
+    if (mov.tipo === 'ingreso' && m.previstoId) mov.previstoId = String(m.previstoId);   // v3.9: cumple este ingreso previsto (paga extra, productividad…)
     if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
     if (mov.tipo === 'gasto' && m.traspasoId) mov.traspasoId = String(m.traspasoId);     // comisión de un traspaso entre cuentas (v3.4)
     return conCuenta(mov, m);
@@ -120,6 +131,7 @@ const NORMALIZAR = {
       descripcion: r.descripcion || '', cuenta: r.cuenta || '', dia: r.dia === FC.DIA_ULTIMO ? FC.DIA_ULTIMO : Math.min(31, Math.max(1, Math.round(num(r.dia, 1)))), desde: r.desde,
       hasta: /^\d{4}-\d{2}$/.test(r.hasta || '') ? r.hasta : '', activo: r.activo !== false };
     if (o.tipo === 'gasto') o.naturaleza = r.naturaleza === 'variable' ? 'variable' : 'fijo'; else o.tipoIngreso = TIPOS_INGRESO[r.tipoIngreso] ? r.tipoIngreso : 'nomina';
+    const dm = diasMesNorm(r.diasMes); if (dm) o.diasMes = dm;   // v3.9: día especial en algún mes del año (p. ej. { 12: 22 })
     return conCuenta(o, r);
   },
   deudas(d) {
@@ -190,6 +202,20 @@ const NORMALIZAR = {
   regularizaciones(r) {
     if (!FC.isISO(r.fecha) || !r.cuentaId || !isFinite(Number(r.importe))) return null;
     return { id: r.id || uid(), cuentaId: String(r.cuentaId), fecha: r.fecha, importe: round2(num(r.importe)), saldoReal: round2(num(r.saldoReal)), nota: txt(r.nota) };
+  },
+  /** v3.9: planificación: presupuestos por categoría e ingresos previstos (ver plan-core.js). */
+  previstos(p) {
+    if (!(num(p.importe) > 0)) return null;
+    const base = { id: p.id || uid(), importe: round2(num(p.importe)), categoria: txt(p.categoria) };
+    if (p.tipo === 'presupuesto') return base.categoria ? { ...base, tipo: 'presupuesto', activo: p.activo !== false } : null;
+    if (p.tipo !== 'ingreso') return null;
+    const ym = v => /^\d{4}-\d{2}$/.test(v || '') ? v : '';
+    const o = { ...base, tipo: 'ingreso', descripcion: txt(p.descripcion), repetir: p.repetir === 'una' ? 'una' : 'anual', conNomina: p.conNomina !== false,
+      estimado: !!p.estimado, incluir: p.incluir !== false, desde: ym(p.desde), hasta: ym(p.hasta) };
+    if (o.repetir === 'una') { o.mes = ym(p.mes); if (!o.mes) return null; }
+    else { o.meses = [...new Set((Array.isArray(p.meses) ? p.meses : []).map(Number).filter(n => Number.isInteger(n) && n >= 1 && n <= 12))].sort((a, b) => a - b); if (!o.meses.length) return null; }
+    if (!o.conNomina) o.dia = p.dia === FC.DIA_ULTIMO ? FC.DIA_ULTIMO : Math.min(31, Math.max(1, Math.round(num(p.dia, 1))));
+    return o;
   },
   traspasosFondos(t) {
     if (!FC.isISO(t.fecha) || !t.origenId || !t.destinoId || t.origenId === t.destinoId || !(num(t.participacionesDestino) > 0)) return null;
@@ -385,6 +411,7 @@ const Store = {
     const t = nowTs();
     for (const col of ['movimientos', 'recurrentes']) this.state[col].forEach(m => { if (!m.deleted && m.tipo === tipo && m.categoria === viejo) { m.categoria = nuevo; m.updatedAt = t; } });
     if (tipo === 'gasto') this.state.deudas.forEach(d => { if (!d.deleted && d.categoria === viejo) { d.categoria = nuevo; d.updatedAt = t; } });
+    this.state.previstos.forEach(p => { if (!p.deleted && (p.tipo === 'presupuesto') === (tipo === 'gasto') && p.categoria === viejo) { p.categoria = nuevo; p.updatedAt = t; } });   // v3.9
     await this.persist(); return true;
   },
   async deleteCategoria(tipo, nombre, reasignarA = 'Otros') {
@@ -393,6 +420,7 @@ const Store = {
     this._touchCats();
     const t = nowTs();
     for (const col of ['movimientos', 'recurrentes']) this.state[col].forEach(m => { if (!m.deleted && m.tipo === tipo && m.categoria === nombre) { m.categoria = reasignarA; m.updatedAt = t; } });
+    this.state.previstos.forEach(p => { if (!p.deleted && (p.tipo === 'presupuesto') === (tipo === 'gasto') && p.categoria === nombre) { p.categoria = reasignarA; p.updatedAt = t; } });   // v3.9
     await this.persist();
   },
   countUsoCategoria(tipo, nombre) { return this.getMovimientos().filter(m => m.tipo === tipo && m.categoria === nombre).length; },
@@ -503,7 +531,7 @@ const Calc = {
   periodosNomina(movs = Store.getMovimientos()) {
     const hoy = todayISO(), inicios = Store.list('cuentas').map(c => c.fechaSaldo).filter(FC.isISO);
     const primero = [...movs.map(m => m.fecha).filter(FC.isISO), ...inicios].sort()[0] || null;
-    return PeriodosCore.periodos(movs, { hoy, inicio: primero });
+    return PeriodosCore.periodos(movs, { hoy, inicio: primero, recurrentes: Store.list('recurrentes') });   // v3.9: el periodo abierto acaba antes de la siguiente nómina recurrente (con su día especial)
   },
   /** Patrimonio neto = dinero en cuentas + valor de las inversiones − deuda pendiente. */
   patrimonio() {
@@ -670,6 +698,7 @@ function renderResumen() {
   $('#kpiTraspasos').hidden = !tp.n;
   $('#kpiTraspasos').textContent = tp.n ? `⇄ ${tp.n} traspaso${tp.n === 1 ? '' : 's'} entre tus cuentas este ${P.nombre} (${eur(tp.importe)}): no cuentan como gasto ni como ingreso.` : '';
   renderSaldoMes(saldo, P);
+  renderPresupuestosResumen(P);   // v3.9 (plan.js)
   renderSobranteAviso(P);
   renderPatrimonio();
 
@@ -957,6 +986,7 @@ function movTipo() { return $('#movForm').querySelector('input[name="tipo"]:chec
 function syncMovOpciones() {
   const f = $('#movForm'), gasto = movTipo() === 'gasto';
   $('#rowNaturaleza').hidden = !gasto; $('#rowTipoIngreso').hidden = gasto;
+  $('#rowPrevisto').hidden = gasto || !$('#mPrevisto').options.length || $('#mPrevisto').options.length < 2;   // v3.9
   ['#optDeuda', '#optFin', '#optGar', '#optComb'].forEach(s => $(s).hidden = !gasto);
   // un repostaje no es pago de deuda, ni compra financiada, ni recurrente
   const comb = gasto && f.esComb.checked;
@@ -1019,6 +1049,7 @@ function openMovDialog(mov, preset = {}) {
   f.descripcion.value = mov?.descripcion || '';
   f.querySelector(`input[name="naturaleza"][value="${mov?.naturaleza || naturalezaPorDefecto(f.categoria.value)}"]`).checked = true;
   $('#mTipoIngreso').value = mov?.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
+  llenarSelectPrevisto(mov?.previstoId || preset.previstoId || '');   // v3.9 (plan.js)
   $('#cuentasList').innerHTML = [...new Set(Store.getMovimientos().map(m => m.cuenta).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
   prepararCuenta(f.cuenta, mov);
   // pago de deuda
@@ -1071,6 +1102,7 @@ $('#movForm').addEventListener('submit', async e => {
   ponerCuenta(mov, f.cuenta, true);
   delete mov.deudaId; delete mov.cuotaN; delete mov.desglose; delete mov.financiadoPor; delete mov.garantia; delete mov.naturaleza; delete mov.tipoIngreso;
   if (gasto) mov.naturaleza = f.querySelector('input[name="naturaleza"]:checked').value; else mov.tipoIngreso = $('#mTipoIngreso').value;   // v3.8: f.tipoIngreso chocaba con el radio id=tipoIngreso (devolvía «ingreso»)
+  delete mov.previstoId; if (!gasto && $('#mPrevisto').value) mov.previstoId = $('#mPrevisto').value;   // v3.9: cumple un ingreso previsto
   const cambios = [];
   // Pago de una cuota de deuda
   if (gasto && f.esPago.checked) {

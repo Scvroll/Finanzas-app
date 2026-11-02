@@ -27,8 +27,24 @@
    * periodos(movimientos, { hoy, inicio, minDias = 20 }) → { hayNominas, lista }
    * lista (cronológica): { id, tipo: 'nomina'|'previo', desde, hasta, abierto, nominas: [movs], importeNomina, nombre, nombreLargo, rango, label }
    * inicio: fecha desde la que empieza el pseudo-periodo previo (por defecto, el primer movimiento).
+   * recurrentes (v3.9): si hay una nómina recurrente, el periodo abierto acaba el día antes de su siguiente fecha
+   *   (con el día especial de ese mes, p. ej. diciembre el 22); si no, un mes después de la nómina.
    */
-  function periodos(movimientos, { hoy, inicio = null, minDias = 20 } = {}) {
+  /** v3.9: siguiente fecha de una nómina recurrente activa después de `desde` (al menos `minDias` después). */
+  function siguienteNomina(recurrentes, desde, minDias = 20) {
+    const ym0 = desde.slice(0, 7); let mejor = null;
+    for (const r of recurrentes || []) {
+      if (!r || r.deleted || r.activo === false || r.tipo !== 'ingreso' || r.tipoIngreso !== 'nomina') continue;
+      for (let k = 0; k <= 2; k++) {
+        const ym = FC.ymAdd(ym0, k);
+        if ((r.desde && ym < r.desde) || (r.hasta && ym > r.hasta)) continue;
+        const f = FC.fechaRecurrenteEn(r, ym);
+        if (FC.diffDays(desde, f) >= minDias) { if (!mejor || f < mejor) mejor = f; break; }
+      }
+    }
+    return mejor;
+  }
+  function periodos(movimientos, { hoy, inicio = null, minDias = 20, recurrentes = [] } = {}) {
     const movs = (movimientos || []).filter(vivo);
     const noms = movs.filter(esNomina).sort((a, b) => a.fecha.localeCompare(b.fecha) || String(a.id).localeCompare(String(b.id)));
     if (!noms.length) return { hayNominas: false, lista: [] };
@@ -40,7 +56,8 @@
     }
     const lista = grupos.map((g, i) => {
       const sig = grupos[i + 1], abierto = !sig;
-      let hasta = sig ? FC.addDaysISO(sig.desde, -1) : FC.addDaysISO(FC.addMonthsISO(g.desde, 1), -1);
+      const esperada = sig ? null : siguienteNomina(recurrentes, g.desde, minDias);
+      let hasta = sig ? FC.addDaysISO(sig.desde, -1) : esperada ? FC.addDaysISO(esperada, -1) : FC.addDaysISO(FC.addMonthsISO(g.desde, 1), -1);
       if (abierto && hoy && hoy > hasta) hasta = hoy;   // la siguiente nómina se retrasa: sigue abierto hasta hoy
       const importe = FC.round2(g.nominas.reduce((s, n) => s + Number(n.importe || 0), 0));
       const nombre = nombreNomina(g.desde), r = rango(g.desde, hasta);
@@ -87,7 +104,7 @@
       ingresosMenosGastos: (ing - gas) / 100, resultado: (arr + ing - gas + prev) / 100 };
   }
 
-  const api = { periodos, periodoEn, periodoDeMes, ahorro, resultado, rango, nombreNomina, esNomina, MESES, MES3 };
+  const api = { periodos, siguienteNomina, periodoEn, periodoDeMes, ahorro, resultado, rango, nombreNomina, esNomina, MESES, MES3 };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PeriodosCore = api;
 })(typeof self !== 'undefined' ? self : globalThis);

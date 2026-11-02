@@ -80,6 +80,7 @@
       <div class="kpi"><div class="label">Invertido (neto)</div><div class="value" id="kpiInvertido">0 €</div><div class="sub" id="kpiInvertidoSub">Compras − ventas del mes</div></div>
     </div>
     <p class="muted small" id="kpiTraspasos" style="margin:-8px 0 12px" hidden></p>
+    <div class="card" id="presupuestosCard" hidden><div class="card-head"><h3 style="margin:0" id="presupuestosTitle">Presupuestos</h3><button class="btn-sm" type="button" data-ir-plan>Configurar</button></div><div id="presupuestosBody"></div></div>
     <div class="card" id="saldoMesCard"><div class="card-head"><h3 style="margin:0" id="saldoMesTitle">Saldo del mes</h3><span class="muted small" id="saldoMesModo"></span></div><div id="saldoMesBody"></div></div>
     <div class="card" id="patrimonioCard" hidden><div class="card-head"><h3 style="margin:0">Patrimonio (hoy)</h3><button class="btn-sm" data-ir-cuentas>Ver cuentas</button></div><div id="patrimonioBody"></div></div>
     <div class="card"><h3 id="desgloseTitle">Desglose del mes</h3><div id="desgloseBody"></div></div>
@@ -105,16 +106,21 @@
     <div class="card" id="prevControles">
       <div class="prev-controles">
         <div class="prev-saldo"><span class="muted small">Saldo de hoy (cuentas del día a día)</span><strong id="prevSaldoHoy"></strong><span class="muted small" id="prevSaldoHoyNota"></span></div>
-        <label><span id="prevMesesLbl">Meses</span><select id="prevMeses"><option value="7">Este mes + 6</option><option value="13">Este mes + 12</option></select></label>
+        <label><span id="prevMesesLbl">Meses</span><select id="prevMeses"><option value="7">Este mes + 6</option><option value="13">Este mes + 12</option><option value="25">Este mes + 24</option></select></label>
         <label><span id="prevVariableLbl">Gasto variable estimado (€ / mes)</span><input id="prevVariable" inputmode="decimal" autocomplete="off"></label>
         <button class="btn-sm" id="prevVariableAuto" type="button">Usar la media</button>
       </div>
       <p class="muted small" id="prevVariableNota" style="margin-bottom:0"></p>
       <div class="notice warn" id="prevNomina" hidden></div>
     </div>
+    <div class="card" id="planCard">
+      <div class="card-head"><h3 style="margin:0">Planificación: presupuestos e ingresos previstos</h3>
+        <div class="plan-btns"><button class="btn-sm" id="planAddPres" type="button">＋ Presupuesto</button><button class="btn-sm" id="planAddIng" type="button">＋ Ingreso previsto</button></div></div>
+      <div id="planBody"></div>
+    </div>
     <div class="card"><h3 style="margin-top:0" id="prevChartTitle">Saldo previsto a fin de cada mes</h3><div class="chart-box" style="height:240px"><canvas id="chartPrevision"></canvas></div></div>
     <div id="prevMesesList"></div>
-    <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. En el mes actual solo cuenta lo que aún está pendiente. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
+    <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. En el mes actual solo cuenta lo que aún está pendiente. Los presupuestos (p. ej. Combustible) cuentan como gasto fijo en cada periodo y los ingresos previstos (pagas extra, productividad) el mes que tocan; cuando apuntas el ingreso real, se usa el real. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
   </section>
 
   <!-- MOVIMIENTOS -->
@@ -423,6 +429,7 @@
       <div id="rowNaturaleza"><label>Tipo de gasto</label>
         <div class="seg seg-sm"><input type="radio" name="naturaleza" id="natFijo" value="fijo"><label for="natFijo">Fijo</label><input type="radio" name="naturaleza" id="natVar" value="variable" checked><label for="natVar">Variable</label></div></div>
       <div id="rowTipoIngreso"><label for="mTipoIngreso">Tipo de ingreso</label><select id="mTipoIngreso" name="tipoIngreso"><option value="nomina">Nómina</option><option value="extra">Extra</option><option value="otro">Otro</option></select></div>
+      <div id="rowPrevisto" hidden><label for="mPrevisto">Corresponde al ingreso previsto</label><select id="mPrevisto"></select></div>
       <p class="full muted small" id="movRecNota" hidden style="margin:0">🔁 Creado por un movimiento recurrente. Cambiarlo aquí solo afecta a este mes.</p>
     </div>
 
@@ -485,6 +492,8 @@
       <div class="full"><label>Descripción</label><input name="descripcion" placeholder="p. ej. Alquiler piso"></div>
       <div><label>Cuenta (opcional)</label><input name="cuenta" list="cuentasList"></div>
       <div><label>Día del mes</label><select name="dia" id="recDiaSel"></select></div>
+      <div class="full" id="recDiasMesRow"><label>Día distinto en algún mes <span class="muted small">(p. ej. la nómina de diciembre el 22)</span></label><div id="recDiasMes" class="rec-diasmes"></div>
+        <button type="button" class="btn-sm" id="recDiasMesAdd">＋ Día distinto en un mes</button></div>
       <div><label>Desde (mes)</label><input name="desde" type="month"></div>
       <div><label>Hasta (mes, opcional)</label><input name="hasta" type="month"></div>
       <div class="full"><label class="check"><input type="checkbox" name="activo" checked> Activo</label></div>
@@ -492,6 +501,33 @@
     <p class="muted small">Elige un día fijo o «Último día del mes». Con un día fijo, si el mes tiene menos días (p. ej. día 31 en febrero), se usa el último día del mes.</p>
     <p class="neg" id="recError" style="margin:10px 0 0;display:none"></p>
     <div class="dialog-actions"><button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button></div>
+  </form>
+</dialog>
+
+<!-- v3.9: Planificación (presupuesto o ingreso previsto) -->
+<dialog id="planDialog">
+  <form id="planForm" method="dialog" novalidate>
+    <h3 id="planDialogTitle">Presupuesto</h3>
+    <input type="hidden" name="id"><input type="hidden" name="tipo" value="presupuesto">
+    <div class="form-grid">
+      <div class="full plan-ing"><label for="plDesc">Concepto</label><input id="plDesc" name="descripcion" placeholder="p. ej. Paga extra"></div>
+      <div><label for="plImporte" id="plImporteLbl">Importe (€)</label><input id="plImporte" name="importe" inputmode="decimal" placeholder="0,00" autocomplete="off"></div>
+      <div><label for="plCategoria">Categoría</label><select id="plCategoria" name="categoria"></select></div>
+      <div class="full plan-ing"><label>¿Cuándo?</label><div class="seg seg-sm"><input type="radio" name="repetir" id="plAnual" value="anual" checked><label for="plAnual">Cada año</label><input type="radio" name="repetir" id="plUna" value="una"><label for="plUna">Una sola vez</label></div></div>
+      <div class="full plan-ing plan-anual"><label>Meses</label><div class="plan-meses" id="plMeses"></div></div>
+      <div class="plan-ing plan-una"><label for="plMes">Mes</label><input id="plMes" name="mes" type="month"></div>
+      <div class="full plan-ing"><label class="check"><input type="checkbox" name="conNomina" checked> Llega con la nómina (el mismo día)</label></div>
+      <div class="plan-ing plan-dia"><label for="plDia">Día del mes</label><input id="plDia" name="dia" inputmode="numeric" placeholder="1"></div>
+      <div class="full plan-ing"><label class="check"><input type="checkbox" name="estimado"> Importe estimado (todavía no sé cuánto será exactamente)</label></div>
+      <div class="full plan-ing"><label class="check"><input type="checkbox" name="incluir" checked> Contarlo en la Previsión</label></div>
+    </div>
+    <p class="muted small plan-pres">Cuenta como un gasto fijo de este importe en cada periodo de la Previsión. Lo que gastes de verdad en esta categoría (fijo o variable) se descuenta del presupuesto, y en el Resumen ves cuánto te queda o cuánto te has pasado. Lo que no gastes queda en el sobrante.</p>
+    <p class="muted small plan-ing">Cuando lo cobres, apúntalo como un ingreso normal (con esta categoría o eligiendo «Corresponde al ingreso previsto»): desde ese momento la Previsión usa el importe real en vez de este.</p>
+    <p class="neg" id="planError" style="margin:10px 0 0;display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn-danger" id="planDelete" style="margin-right:auto;display:none">Eliminar</button>
+      <button type="button" data-close>Cancelar</button><button type="submit" class="btn-primary">Guardar</button>
+    </div>
   </form>
 </dialog>
 
@@ -786,6 +822,7 @@
 <script src="js/auth.js"></script>
 <script src="js/finance-core.js"></script>
 <script src="js/cuentas-core.js"></script>
+<script src="js/plan-core.js"></script>
 <script src="js/prevision-core.js"></script>
 <script src="js/periodos-core.js"></script>
 <script src="js/fuel-core.js"></script>
@@ -797,6 +834,7 @@
 <script src="js/vehiculos.js"></script>
 <script src="js/cuentas.js"></script>
 <script src="js/prevision.js"></script>
+<script src="js/plan.js"></script>
 <script src="js/periodos.js"></script>
 <script src="js/analysis-export.js"></script>
 <script src="js/main.js"></script>

@@ -106,6 +106,19 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.9.0 (presupuestos, pagas extra, productividad y nómina en otro día)
+
+- Sube los archivos cambiados, incluidos los dos nuevos **`js/plan-core.js`** y **`js/plan.js`**: `index.html`, `css/styles.css`, `sw.js`, `README.md`, `SETUP.md`, `js/config.js`, `js/finance-core.js`, `js/plan-core.js`, `js/plan.js`, `js/prevision-core.js`, `js/prevision.js`, `js/periodos-core.js`, `js/sync-core.js`, `js/app.js`, `js/app-extra.js`, `js/analysis-export.js` (en `sw.js`, `VERSION = 'finanzas-v3.9.0'`). No cambia nada en Google Cloud.
+- **Actualiza todos los dispositivos.** Hay una colección nueva que se sincroniza (`previstos`: presupuestos e ingresos previstos) y campos nuevos (`diasMes` en los recurrentes, `previstoId` en los movimientos). Un dispositivo que siga con la v3.8.1 no los conoce y, si sube cambios, los perdería.
+- **Presupuesto de combustible (o de cualquier categoría):** Previsión → tarjeta **Planificación** → **⛽ Combustible 200 € por periodo** (o **＋ Presupuesto** y eliges la categoría y el importe). En los periodos futuros cuenta como gasto fijo. En el periodo actual cuenta lo que llevas gastado y, de lo que queda, solo lo que falta por gastar. En el Resumen, la tarjeta **Presupuestos del periodo** muestra «Te quedan …» o «Te has pasado …». El resultado usa lo gastado de verdad: lo que no gastes queda en el sobrante. Los recurrentes y la media de gasto variable de esa categoría ya no se suman aparte, así que no se cuenta dos veces (aunque tengas el combustible marcado como fijo).
+- **Pagas extra:** Planificación → **💶 Pagas extra (junio y diciembre)**. Ajusta los meses y el importe. Entran el mismo día que la nómina de ese mes.
+- **Productividad:** Planificación → **🎯 Productividad (mayo, estimada)**. Pon el importe que esperas. Sale marcada como «Estimado». Desmarca **Contar en la Previsión** para no contarla (sale como «No incluido»); por defecto sí cuenta.
+- **Otros ingresos:** **＋ Ingreso de una sola vez** (fecha e importe) o **＋ Ingreso previsto**.
+- Todo se puede cambiar cuando quieras con **Editar** (importe, meses, categoría, si cuenta o no).
+- **Cuando llega el dinero de verdad:** apúntalo como ingreso con la misma categoría (p. ej. «Paga Extra» o «Productividad») o, en el diálogo del movimiento, elige el ingreso en **Corresponde al ingreso previsto**. La Previsión pasa a usar el importe real y no suma el previsto (en Planificación sale «✔ diciembre: cobrado …»). Si la fecha prevista ya pasó y no lo has apuntado, sale como «(pendiente de cobrar)».
+- **Nómina en otro día (p. ej. diciembre el 22):** hace falta la nómina como recurrente. Previsión → **Guardar como nómina recurrente**, o Movimientos → **Movimientos recurrentes** → ✏️ en la nómina. Después pulsa **＋ Día distinto en un mes** y elige **Diciembre** y **22**. Sirve para todos los años. El periodo abierto del Resumen acaba el 21 de diciembre, y la Previsión muestra el periodo largo del 22 de diciembre al 27 de enero (etiqueta «Periodo largo»).
+- La Previsión muestra ahora **13 periodos** por defecto (selector: 7, 13 o 25). Si antes elegiste 7, se mantiene.
+
 ### Actualizar a la v3.8.1 (el Resultado cuenta lo que arrastras del periodo anterior)
 
 - Sube los archivos cambiados: `index.html`, `css/styles.css`, `js/app.js`, `js/periodos-core.js`, `js/config.js`, `sw.js`, `README.md`, `SETUP.md` (en `sw.js`, `VERSION = 'finanzas-v3.8.1'`). No cambia nada en Google Cloud ni en los datos.

@@ -12,24 +12,31 @@ function calcPrevision() {
   const v = prevLS(PREV_KEY_VAR);
   const esLiquido = m => { if (!hayCuentas) return true; const c = cuentaDeRegistro(m); return !c || CuentasCore.enSaldoMes(c); };
   const P = PrevisionCore.prevision({ hoy, saldoHoy: saldo === null ? 0 : saldo, movimientos: Store.getMovimientos(), recurrentes: Store.list('recurrentes'), deudas: Store.list('deudas'),
-    meses: Number(prevLS(PREV_KEY_MESES)) || 7, gastoVariable: v === null || v === '' ? null : Number(v), esLiquido, porNomina: vistaNomina() });
+    meses: Number(prevLS(PREV_KEY_MESES)) || 13, gastoVariable: v === null || v === '' ? null : Number(v), esLiquido, porNomina: vistaNomina(),   // v3.9: por defecto 13 (para ver junio, diciembre y mayo)
+    previstos: Store.list('previstos') });
   return { ...P, saldoHoy: saldo === null ? 0 : saldo, saldoNulo: saldo === null, hayCuentas };
 }
 
-const prevItems = (m, vacio) => m.items.length ? m.items.map(it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ' <span class="badge b-var">Estimada</span>' : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`).join('')
+const prevItem = it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}${it.previsto ? ' prev-previsto' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ` <span class="badge b-var">${it.previsto ? 'Estimado' : 'Estimada'}</span>` : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.previsto ? 'Ingreso previsto (Planificación)' : it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`;
+// v3.9: presupuestos (gasto fijo del periodo: lo que queda) e ingresos previstos que has quitado de la Previsión
+const prevPresu = m => m.presupuestosDet.map(x => `<tr class="prev-item prev-presu"><td class="nowrap"></td><td>Presupuesto ${esc(x.categoria)} <span class="badge">${eur(x.presupuesto)}</span><div class="muted small">Gasto fijo (presupuesto)${x.gastado ? ` · ya gastado ${eur(x.gastado)}${x.excedido ? `, te has pasado ${eur(x.excedido)}` : ''}` : ''}</div></td><td class="num neg">${x.queda ? '−' : ''}${eur(x.queda)}</td></tr>`).join('');
+const prevExcl = m => (m.excluidos || []).map(x => `<tr class="prev-item prev-excluido"><td class="nowrap">${fmtFecha(x.fecha).slice(0, 5)}</td><td>${esc(x.concepto)} <span class="badge">No incluido</span><div class="muted small">Lo has quitado de la Previsión (Planificación)</div></td><td class="num muted">${eur(x.importe)}</td></tr>`).join('');
+const prevItems = (m, vacio) => m.items.length || m.presupuestosDet.length || (m.excluidos || []).length ? m.items.map(prevItem).join('') + prevPresu(m) + prevExcl(m)
   : `<tr><td colspan="3" class="empty">${vacio}</td></tr>`;
+const filaPresu = (m, fila) => m.presupuestosDet.length ? fila(`Presupuestos (gasto fijo): ${m.presupuestosDet.map(x => esc(x.categoria)).join(', ')}${m.actual ? ' · lo que queda' : ''}`, m.presupuestos, '−', 'prev-presu-fila') : '';
 /** v3.8: tarjeta de un periodo de nómina (de la nómina al día antes de la siguiente). */
 function tarjetaPeriodo(m, i) {
   const ok = m.sobra >= 0, s = m.seAcaba;
   const fila = (lbl, v, signo, cls = '') => `<tr class="${cls}"><td>${lbl}</td><td class="num ${signo === '+' ? 'pos' : signo === '−' && v ? 'neg' : ''}">${signo && v ? signo : ''}${eur(v)}</td></tr>`;
   return `<div class="card prev-mes ${ok && !s ? 'ok' : 'mal'}" data-prev-mes="${m.clave}">
-    <div class="card-head"><h3 style="margin:0">${esc(m.nombre)} <span class="muted small">(${esc(m.rango)})${m.actual ? ' · periodo actual, desde hoy' : ''}</span></h3>
+    <div class="card-head"><h3 style="margin:0">${esc(m.nombre)} <span class="muted small">(${esc(m.rango)} · ${m.dias} días)${m.actual ? ' · periodo actual, desde hoy' : ''}</span>${m.dias >= 34 ? ' <span class="badge b-warn" data-prev-largo>Periodo largo</span>' : ''}</h3>
       <span class="prev-estado ${ok ? 'ok' : 'mal'}" data-prev-estado>${ok ? `Sobrarán ${eur(m.sobra)}` : `⚠ Faltarán ${eur(m.falta)}`}</span></div>
     ${s ? `<p class="prev-aviso prev-acaba" data-prev-aviso>⚠ <strong>El dinero se acaba hacia el ${fmtFecha(s.fecha)}</strong>, antes de la nómina del ${fmtFecha(s.nomina)}: tu saldo podría bajar a <strong>${eur(s.minimo)}</strong>${s.fechaMinimo !== s.fecha ? ` (el ${fmtFecha(s.fechaMinimo)})` : ''}.${m.arrastra ? ` Empiezas el periodo con ${eur(m.arrastra)} del anterior.` : ''} <span class="muted small">Contando el gasto variable repartido por igual cada día.</span></p>` : ''}
     <table class="prev-resumen"><tbody>
       ${fila(m.actual ? 'Saldo de hoy' : 'Saldo inicial (lo que sobra del periodo anterior)', m.saldoInicial, '', 'prev-ini')}
       ${fila('Nómina e ingresos previstos' + (m.nominaEstimada ? ' (nómina estimada)' : ''), m.ingresos, '+')}
       ${fila('Gastos fijos', m.fijos, '−')}
+      ${filaPresu(m, fila)}
       ${fila('Cuotas de deudas', m.cuotas, '−')}
       ${fila(m.actual ? `Gasto variable que falta (${eur(m.variableYaGastado)} ya gastado)` : 'Gasto variable estimado', m.variable, '−')}
       <tr class="total"><td>${ok ? `Sobrante previsto al llegar la nómina del ${fmtFecha(m.siguienteNomina)}` : `Falta previsto al llegar la nómina del ${fmtFecha(m.siguienteNomina)}`}</td><td class="num ${ok ? 'pos' : 'neg'}" data-prev-sobra>${eur(m.sobra)}</td></tr>
@@ -47,7 +54,7 @@ function renderPrevision() {
   // v3.8: por periodos de nómina (de nómina a nómina) si la vista es «Periodo de nómina»
   const nom = P.modo === 'nomina', ud = nom ? 'periodo' : 'mes';
   $('#prevMesesLbl').textContent = nom ? 'Periodos' : 'Meses';
-  $('#prevMeses').options[0].textContent = nom ? 'Este periodo + 6' : 'Este mes + 6'; $('#prevMeses').options[1].textContent = nom ? 'Este periodo + 12' : 'Este mes + 12';
+  ['+ 6', '+ 12', '+ 24'].forEach((t, k) => { $('#prevMeses').options[k].textContent = (nom ? 'Este periodo ' : 'Este mes ') + t; });
   $('#prevVariableLbl').textContent = `Gasto variable estimado (€ / ${ud})`;
   $('#prevChartTitle').textContent = nom ? 'Lo que sobra al llegar cada nómina' : 'Saldo previsto a fin de cada mes';
   const vGuardado = prevLS(PREV_KEY_VAR), inp = $('#prevVariable');
@@ -56,20 +63,20 @@ function renderPrevision() {
   $('#prevVariableAuto').hidden = vGuardado === null || vGuardado === '';
   const a = P.gastoVariableAuto;
   $('#prevVariableNota').textContent = (vGuardado === null || vGuardado === ''
-    ? (a.meses.length ? `Gasto variable: ${eur(a.importe)} al ${ud}, la media de ${a.meses.map(m => monthLabel(m)).join(', ')} (gastos marcados como «variable»).` : 'Aún no hay meses completos con gastos variables: se cuenta 0 €. Escribe una estimación si quieres.')
+    ? (a.meses.length ? `Gasto variable: ${eur(a.importe)} al ${ud}, la media de ${a.meses.map(m => monthLabel(m)).join(', ')} (gastos marcados como «variable»${P.presupuestos.length ? `, sin ${P.presupuestos.map(p => p.categoria).join(', ')}, que tiene${P.presupuestos.length === 1 ? '' : 'n'} presupuesto` : ''}).` : 'Aún no hay meses completos con gastos variables: se cuenta 0 €. Escribe una estimación si quieres.')
     : `Gasto variable: ${eur(P.gastoVariable)} al ${ud} (lo has escrito tú; la media sería ${eur(a.importe)}).`) + ` En el ${ud} actual solo se resta lo que falta por gastar.`
     + (nom ? ' Cada periodo empieza el día que esperas la nómina e incluye los gastos fijos, las cuotas y el gasto variable hasta la siguiente.' : '');
+  renderPlan(P);   // v3.9 (plan.js)
   // Nómina estimada
   const nb = $('#prevNomina'), ne = P.nominaEstimada;
   nb.hidden = !ne;
-  if (ne) nb.innerHTML = `<span>💼 No tienes la nómina como movimiento recurrente: se <strong>estima ${eur(ne.importe)} el día ${ne.dia}</strong> de cada mes (como la última, del ${fmtFecha(ne.desde)}).</span> <button class="btn-sm btn-primary" id="prevNominaRec" type="button">Guardar como nómina recurrente</button>`;
+  if (ne) nb.innerHTML = `<span>💼 No tienes la nómina como movimiento recurrente: se <strong>estima ${eur(ne.importe)} el día ${ne.dia}</strong> de cada mes (como la última, del ${fmtFecha(ne.desde)}). Guárdala como recurrente para poner un día distinto en algún mes (p. ej. diciembre el 22).</span> <button class="btn-sm btn-primary" id="prevNominaRec" type="button">Guardar como nómina recurrente</button>`;
 
   $('#prevMesesList').innerHTML = P.meses.map((m, i) => {
     const ok = m.sobra >= 0, aviso = m.avisoAntesDeCobrar || m.avisoDentroMes;
     if (nom) return tarjetaPeriodo(m, i);
     const fila = (lbl, v, signo, cls = '') => `<tr class="${cls}"><td>${lbl}</td><td class="num ${signo === '+' ? 'pos' : signo === '−' && v ? 'neg' : ''}">${signo && v ? signo : ''}${eur(v)}</td></tr>`;
-    const items = m.items.length ? m.items.map(it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ' <span class="badge b-var">Estimada</span>' : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`).join('')
-      : '<tr><td colspan="3" class="empty">Nada previsto este mes.</td></tr>';
+    const items = prevItems(m, 'Nada previsto este mes.');
     return `<div class="card prev-mes ${ok ? 'ok' : 'mal'}" data-prev-mes="${m.mes}">
       <div class="card-head"><h3 style="margin:0">${monthLabel(m.mes)}${m.actual ? ' <span class="muted small">(este mes, desde hoy)</span>' : ''}</h3>
         <span class="prev-estado ${ok ? 'ok' : 'mal'}" data-prev-estado>${ok ? `Te sobrarán ${eur(m.sobra)}` : `⚠ Te faltarán ${eur(m.falta)}`}</span></div>
@@ -80,6 +87,7 @@ function renderPrevision() {
         ${fila(m.actual ? 'Saldo de hoy' : `Saldo inicial (lo que sobra de ${monthLabel(P.meses[i - 1].mes)})`, m.saldoInicial, '', 'prev-ini')}
         ${fila('Ingresos previstos' + (m.nominaEstimada ? ' (nómina estimada)' : ''), m.ingresos, '+')}
         ${fila('Gastos fijos', m.fijos, '−')}
+        ${filaPresu(m, fila)}
         ${fila('Cuotas de deudas', m.cuotas, '−')}
         ${fila(m.actual ? `Gasto variable que falta (${eur(m.variableYaGastado)} ya gastado)` : 'Gasto variable estimado', m.variable, '−')}
         <tr class="total"><td>${ok ? 'Previsto que sobra' : 'Previsto que falta'}</td><td class="num ${ok ? 'pos' : 'neg'}" data-prev-sobra>${eur(m.sobra)}</td></tr>

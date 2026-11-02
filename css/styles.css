@@ -354,3 +354,20 @@ select.cuenta-sel{width:100%}
 
 /* v3.8.1: desglose del Resultado (arrastre + ingresos − gastos) */
 .kpi .sub.kpi-desglose{font-size:.75rem;line-height:1.3}
+/* v3.9: Planificación (presupuestos e ingresos previstos) */
+.plan-btns{display:flex;gap:6px;flex-wrap:wrap}
+.plan-h{margin:10px 0 4px;font-size:.95rem}
+.plan-tabla{width:100%}
+.plan-tabla td{padding:6px 4px;border-bottom:1px solid var(--border);vertical-align:top}
+.plan-meses{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px 8px}
+.plan-meses .check{margin:0}
+.rec-diames{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.rec-diames select{flex:1;min-width:0}
+.presu{margin:8px 0 12px}
+.presu-top{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}
+.presu-bar{height:10px;border-radius:999px;background:color-mix(in srgb,var(--muted) 18%,transparent);overflow:hidden}
+.presu-bar span{display:block;height:100%;background:var(--ok)}
+.presu-bar.warn span{background:var(--warn,#d97706)}
+.presu-bar.mal span{background:var(--danger)}
+.prev-excluido td{opacity:.65}
+@media (max-width:600px){.plan-meses{grid-template-columns:repeat(4,minmax(0,1fr))}.plan-tabla td{display:block;border-bottom:0;padding:2px 4px}.plan-tabla tr{display:block;border-bottom:1px solid var(--border);padding:4px 0}.plan-tabla td.num{text-align:left}}

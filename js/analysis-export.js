@@ -140,7 +140,9 @@
     const combustible = { metodo: 'Consumo «lleno a lleno»: litros y euros repostados desde el último depósito lleno hasta el siguiente (incluidos los parciales) ÷ km recorridos en ese tramo. Si no hay dos llenos seguidos: aproximado con litros del repostaje anterior ÷ km. €/L medio ponderado por litros. €/km solo incluye combustible.',
       totales: metr(res.total), porMes: Fuel.porMes(vehs, reps, {}), porAnio: Fuel.porAnio(vehs, reps) };
 
-    const recurrentes = vivos(estado.recurrentes).map(r => { const cu = CC.resolver(r, idxCu); return { id: r.id, tipo: r.tipo, descripcion: r.descripcion, categoria: r.categoria, importe: r2(r.importe), dia: r.dia, desde: r.desde, hasta: r.hasta || '', activo: r.activo !== false, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso, cuentaId: cu ? cu.id : null }; });
+    const recurrentes = vivos(estado.recurrentes).map(r => { const cu = CC.resolver(r, idxCu); return { id: r.id, tipo: r.tipo, descripcion: r.descripcion, categoria: r.categoria, importe: r2(r.importe), dia: r.dia, desde: r.desde, hasta: r.hasta || '', activo: r.activo !== false, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso, ...(r.diasMes ? { diasMes: r.diasMes } : {}), cuentaId: cu ? cu.id : null }; });
+    // v3.9: planificación (presupuestos por categoría e ingresos previstos)
+    const planificacion = vivos(estado.previstos || []).map(({ updatedAt, driveId, ...p }) => p);
 
     // Cuentas y saldos (v3.4)
     const sal = CC.saldos({ cuentas: cuentasArr, movimientos: movs, traspasos: traspasosArr, regularizaciones: regsArr, operaciones: ops, activos }, hoy);
@@ -167,7 +169,7 @@
       categorias: estado.categorias ? { gasto: estado.categorias.gasto || [], ingreso: estado.categorias.ingreso || [] } : null,
       totales: { movimientos: movimientos.length, vehiculos: vehiculos.length, gastoCombustible: combustible.totales.gasto, deudasActivas: deudas.filter(d => !d.terminada).length, capitalPendienteDeudas: capPend, cartera: tot,
         dineroEnCuentas: sal.total, patrimonioNeto: r2(sal.total + tot.valor - capPend), garantiasProximas: garantias.filter(g => g.estado === 'proxima').length, garantiasCaducadas: garantias.filter(g => g.estado === 'caducada').length },
-      resumenMensual, gastosPorCategoria, movimientos, recurrentes, deudas,
+      resumenMensual, gastosPorCategoria, movimientos, recurrentes, planificacion, deudas,
       cuentas, traspasos, ajustesSaldo,
       inversiones: { metodo: 'FIFO', activos: activosOut, totales: tot, traspasosEntreFondos: traspasosFondos },
       garantias,

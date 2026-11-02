@@ -19,7 +19,7 @@
   // solo para que sus lápidas (tras migrar a activos/operaciones) lleguen a todos los dispositivos.
   // v3.4 añade cuentas, traspasos (entre cuentas), regularizaciones («Ajustar saldo») y traspasosFondos.
   const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios', 'vehiculos', 'repostajes',
-    'cuentas', 'traspasos', 'regularizaciones', 'traspasosFondos'];
+    'cuentas', 'traspasos', 'regularizaciones', 'traspasosFondos', 'previstos'];   // v3.9: previstos (presupuestos e ingresos previstos)
   // Lápidas que no se purgan nunca: los movimientos generados por plantillas recurrentes tienen id
   // determinista y se volverían a generar si su lápida desapareciera.
   const NO_PURGAR = /^rec_/;
