@@ -1661,8 +1661,11 @@ const Sync = {
 };
 
 async function reconnect() {
-  try { await Auth._request(''); toast('Sesión renovada'); await Sync.now({ force: true }); }
-  catch (e) { toast(e.message); }
+  try {
+    if (Auth.tokenValid) { toast('Sesión renovada'); await Sync.now({ force: true }); return; }
+    await Auth._request('', '', 'reauth');
+    toast('Sesión renovada'); await Sync.now({ force: true });
+  } catch (e) { toast(e.message); }
 }
 
 async function signIn() {

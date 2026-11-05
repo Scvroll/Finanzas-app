@@ -9,7 +9,14 @@ Store.onChange(() => { renderAll(); renderSync(); });
   const vista = location.hash.slice(1);
   showView($('#view-' + vista) ? vista : 'resumen');
   renderSync();
-  if (Sync.active && Auth.tokenValid) Sync.now();
+  // Vuelta del OAuth por redirección (PWA instalada / popup fallido): el token ya está; completar perfil o sync.
+  const rr = Auth.redirectResult;
+  if (rr) {
+    if (!rr.ok) toast(rr.error || 'No se pudo iniciar sesión con Google');
+    else if (rr.kind === 'signin' || (!Auth.user && Auth.tokenValid)) signIn();
+    else if (Auth.tokenValid) { toast('Sesión renovada'); Sync.now({ force: true }); }
+    Auth.redirectResult = null;
+  } else if (Sync.active && Auth.tokenValid) Sync.now();
   notificarGarantias();
   limpiarAdjuntosHuerfanos();
 })();

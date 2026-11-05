@@ -5,7 +5,7 @@
      y el lector de texto Tesseract.js (se descarga solo cuando se usa por primera vez).
    - Nunca guarda nada de Google (inicio de sesión ni datos de Drive).
    Al cambiar archivos de la app, sube VERSION para forzar la actualización. */
-const VERSION = 'finanzas-v3.9.0';
+const VERSION = 'finanzas-v3.9.1';
 const CDN_CACHE = 'finanzas-cdn-v1'; // aparte: no se vacía al actualizar la app (las URL llevan versión)
 const CHART_URL = 'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js';
 const SHELL = [
@@ -51,6 +51,9 @@ self.addEventListener('fetch', event => {
   }
 
   if (url.origin !== self.location.origin) return;
+  // Navegación (p. ej. vuelta del OAuth con #access_token en el hash): el navegador no envía el hash
+  // al service worker; respondemos network-first y devolvemos el Response tal cual. El hash sigue
+  // en location.hash para que Auth.init lo lea y lo limpie con history.replaceState.
   event.respondWith((async () => {   // propios: primero red, si no hay conexión, caché
     const cache = await caches.open(VERSION);
     try {
