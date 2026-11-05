@@ -83,10 +83,12 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 3. **Orígenes de JavaScript autorizados** → *Añadir URI*:
    - `https://<usuario>.github.io` (cambia `<usuario>` por tu usuario de GitHub, sin barra final ni ruta)
    - `http://localhost:8000` (para probar en tu ordenador)
-4. **URI de redireccionamiento autorizados**: déjalo **vacío** (el inicio de sesión usa una ventana emergente, no redirecciones).
+4. **URI de redireccionamiento autorizados** → *Añadir URI* (hace falta para la app instalada en el móvil; el navegador sigue usando ventana emergente):
+   - `https://<usuario>.github.io/<nombre-repo>/` — la **raíz exacta** de la app, con barra final y sin `index.html`. Ejemplo de esta app: `https://scvroll.github.io/Finanzas-app/`
+   - Si pruebas en local: la misma URL con la que abres la app (p. ej. `http://localhost:8000/` o `http://localhost:8765/`).
 5. **Crear**. Copia el **ID de cliente** (termina en `.apps.googleusercontent.com`). **No** necesitas el «secreto de cliente»: no lo pongas en ningún sitio.
 
-> Los cambios de orígenes pueden tardar unos minutos (a veces hasta horas) en aplicarse. Si sale `Error 400: origin_mismatch`, revisa que el origen coincide exactamente y espera un poco.
+> Los cambios de orígenes y de URI de redirección pueden tardar unos minutos (a veces hasta horas) en aplicarse. Si sale `Error 400: origin_mismatch` o `redirect_uri_mismatch`, revisa que coinciden exactamente (incluida la barra final) y espera un poco.
 
 ## 5. Habilitar la API de Google Drive
 
@@ -105,6 +107,17 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 > El ID de cliente **no es secreto**: está pensado para ir en el código de la web. Solo funciona desde los orígenes que autorizaste en el paso 4.
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
+
+### Actualizar a la v3.9.1 (inicio de sesión en la PWA instalada en Android)
+
+- Sube: `js/auth.js`, `js/main.js`, `js/app.js`, `js/config.js`, `sw.js`, `SETUP.md`, `README.md` (en `sw.js`, `VERSION = 'finanzas-v3.9.1'`).
+- **Obligatorio en Google Cloud** (mismo cliente OAuth `…apps.googleusercontent.com`): Clientes → tu cliente web → **URI de redireccionamiento autorizados** → añade exactamente:
+  - `https://scvroll.github.io/Finanzas-app/`
+  Sin esto, en el móvil instalado Google responde `redirect_uri_mismatch` y no conecta.
+- En el **móvil** (Chrome Android o app instalada) el login ya no usa ventana emergente: te lleva a la cuenta de Google y vuelve solo. En el ordenador (navegador de escritorio) se sigue usando la ventana emergente.
+- Si un intento anterior se quedó a medias, al volver a pulsar Entrar/Reconectar se cancela y se reintenta (antes podía quedar bloqueado sin mensaje).
+- Si la sesión caduca en la app instalada, pulsa **Reconectar** (no se redirige sola al editar).
+- Los datos locales (movimientos, etc.) están en `localStorage` y no se pierden al ir y volver de Google.
 
 ### Actualizar a la v3.9.0 (presupuestos, pagas extra, productividad y nómina en otro día)
 
