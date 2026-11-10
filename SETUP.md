@@ -108,6 +108,13 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.10.0 (todos los gastos del vehículo)
+
+- Sube los archivos cambiados, incluido el nuevo **`js/vehiculos-core.js`**: `index.html`, `css/styles.css`, `sw.js`, `README.md`, `SETUP.md`, `js/config.js`, `js/app.js`, `js/vehiculos.js`, `js/vehiculos-core.js`, `js/analysis-export.js`, `js/main.js` (en `sw.js`, `VERSION = 'finanzas-v3.10.0'`).
+- **Actualiza todos los dispositivos.** Los gastos llevan un campo nuevo (`vehiculoId`). Un dispositivo que siga con la v3.9.1 **descarta ese campo** al guardar un movimiento: si editas el mismo gasto ahí, se pierde la asignación al coche. El resto de datos no cambia.
+- En el diálogo de un gasto aparece **Vehículo (opcional)**. Si la categoría o la descripción parecen del coche (seguro, ITV, taller, peajes…) y solo tienes un vehículo en uso, se preselecciona.
+- Pestaña **Vehículos**: coste total por categoría, €/km con todos los gastos, media mensual, lista de gastos (aparte del combustible) y **Asignar gastos** para los que aún no tienen matrícula.
+
 ### Actualizar a la v3.9.1 (inicio de sesión en la PWA instalada en Android)
 
 - Sube: `js/auth.js`, `js/main.js`, `js/app.js`, `js/config.js`, `sw.js`, `SETUP.md`, `README.md` (en `sw.js`, `VERSION = 'finanzas-v3.9.1'`).

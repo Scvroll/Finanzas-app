@@ -371,3 +371,7 @@ select.cuenta-sel{width:100%}
 .presu-bar.mal span{background:var(--danger)}
 .prev-excluido td{opacity:.65}
 @media (max-width:600px){.plan-meses{grid-template-columns:repeat(4,minmax(0,1fr))}.plan-tabla td{display:block;border-bottom:0;padding:2px 4px}.plan-tabla tr{display:block;border-bottom:1px solid var(--border);padding:4px 0}.plan-tabla td.num{text-align:left}}
+
+/* v3.10: gastos del vehículo */
+.badge.b-veh{background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc}
+#vehDesglose .empty{margin:0}

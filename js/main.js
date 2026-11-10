@@ -41,4 +41,4 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // API para pruebas / consola
-window.FinanzasApp = { Store, Sync, FileSync, Auth, localCache, normalizeState, Calc, UI, setMes, showView, parseImporte, generarDatosEjemplo, movimientosCSV, AdjUI, OCR, openMovDialog, openCuadro, openDetalle, planCSV, todayISO, setNomina, setVista, periodo, Sobrante: typeof Sobrante !== 'undefined' ? Sobrante : null };
+window.FinanzasApp = { Store, Sync, FileSync, Auth, localCache, normalizeState, Calc, UI, setMes, showView, parseImporte, generarDatosEjemplo, movimientosCSV, AdjUI, OCR, openMovDialog, openCuadro, openDetalle, planCSV, todayISO, setNomina, setVista, periodo, Sobrante: typeof Sobrante !== 'undefined' ? Sobrante : null, VehiculosCore: typeof VehiculosCore !== 'undefined' ? VehiculosCore : null };

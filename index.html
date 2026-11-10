@@ -256,15 +256,18 @@
 
   <!-- VEHÍCULOS Y COMBUSTIBLE -->
   <section class="view" id="view-vehiculos">
-    <div class="card-head" style="margin-bottom:12px"><h2 style="margin:0">Vehículos y combustible</h2>
-      <div class="btn-row"><button id="addVehBtn">＋ Vehículo</button><button class="btn-primary" id="addRepBtn">⛽ Repostaje</button></div></div>
+    <div class="card-head" style="margin-bottom:12px"><h2 style="margin:0">Vehículos</h2>
+      <div class="btn-row"><button id="addVehBtn">＋ Vehículo</button><button class="btn-primary" id="addRepBtn">⛽ Repostaje</button><button id="asigVehBtn">Asignar gastos</button></div></div>
     <div class="toolbar" style="margin-bottom:12px">
       <div class="grow"><label for="vehFiltro">Vehículo</label><select id="vehFiltro"></select></div>
       <div><label for="vehPeriodo">Periodo</label><select id="vehPeriodo"></select></div>
     </div>
     <div class="grid kpis" style="margin-bottom:16px">
+      <div class="kpi"><div class="label">Coste total del coche</div><div class="value neg" id="vkTotal">0 €</div><div class="sub" id="vkTotalSub"></div></div>
+      <div class="kpi"><div class="label">Media mensual</div><div class="value" id="vkMedia">—</div><div class="sub" id="vkMediaSub"></div></div>
+      <div class="kpi"><div class="label">Coste por km</div><div class="value" id="vkEurKmAll">—</div><div class="sub" id="vkEurKmAllSub">Todos los gastos</div></div>
       <div class="kpi"><div class="label">Gasto en combustible</div><div class="value neg" id="vkGasto">0 €</div><div class="sub" id="vkGastoSub"></div></div>
-      <div class="kpi"><div class="label">Coste por km</div><div class="value" id="vkEurKm">—</div><div class="sub" id="vkEurKmSub">Solo combustible</div></div>
+      <div class="kpi"><div class="label">Coste combustible / km</div><div class="value" id="vkEurKm">—</div><div class="sub" id="vkEurKmSub">Solo combustible</div></div>
       <div class="kpi"><div class="label">Consumo medio</div><div class="value" id="vkL100">—</div><div class="sub" id="vkL100Sub"></div></div>
       <div class="kpi"><div class="label">Precio medio del litro</div><div class="value" id="vkPrecio">—</div><div class="sub" id="vkPrecioSub"></div></div>
       <div class="kpi"><div class="label">Litros</div><div class="value" id="vkLitros">0 L</div><div class="sub" id="vkLitrosSub"></div></div>
@@ -275,6 +278,17 @@
     <div class="card">
       <h3>Tus vehículos</h3>
       <div id="vehLista"></div>
+    </div>
+    <div class="grid charts" id="vehCosteCharts">
+      <div class="card"><h3>Reparto del coste</h3><div class="chart-box"><canvas id="chartCosteVeh"></canvas><div class="empty chart-empty" id="chartCosteVehEmpty">Sin gastos de vehículo en este periodo</div></div></div>
+      <div class="card" id="vehDesgloseCard"><h3>Desglose por categoría</h3><div id="vehDesglose"></div></div>
+    </div>
+    <div class="card">
+      <h3>Otros gastos del vehículo</h3>
+      <p class="muted small">Seguro, ITV, taller, peajes, parking… Pulsa un gasto para editarlo. Los repostajes están más abajo.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Fecha</th><th>Concepto</th><th class="hide-sm">Categoría</th><th class="num">Importe</th><th></th></tr></thead>
+        <tbody id="vehGastosBody"></tbody></table></div>
     </div>
     <div class="grid charts">
       <div class="card"><h3>Precio del litro (€/L)</h3><div class="chart-box"><canvas id="chartPrecioLitro"></canvas><div class="empty chart-empty" id="chartPrecioLitroEmpty">Sin repostajes</div></div></div>
@@ -304,7 +318,7 @@
         <li><strong>Km con el depósito anterior:</strong> los km que hiciste desde el repostaje anterior hasta este. Si no los anotas pero pones el cuentakilómetros en los dos, se calculan por diferencia.</li>
         <li><strong>Consumo (L/100 km) y km/L:</strong> método «lleno a lleno», el más fiable. Al llenar el depósito, los litros que entran son lo que el coche gastó desde el lleno anterior. Si entre dos llenos hubo repostajes parciales, se suman sus litros y sus km. Los parciales del final cuentan cuando vuelvas a llenar.</li>
         <li><strong>Si nunca llenas el depósito</strong> (p. ej. siempre echas 20 € al encender la reserva), se usa una aproximación: litros del repostaje anterior ÷ km hechos con ese depósito. Se marca como «aprox.».</li>
-        <li><strong>Coste por km:</strong> lo que costó el combustible de esos tramos ÷ sus km. No incluye seguro, taller ni impuestos.</li>
+        <li><strong>Coste por km (todos los gastos):</strong> la suma de combustible, seguro, taller, ITV, etc. de este periodo ÷ los km anotados en los repostajes (o la diferencia de cuentakilómetros). El coste «solo combustible» sigue debajo.</li>
         <li><strong>Precio medio del litro:</strong> ponderado: total pagado ÷ total de litros (no la media simple de precios).</li>
         <li><strong>Autonomía:</strong> capacidad del depósito × km/L medio.</li>
       </ul>
@@ -426,6 +440,11 @@
       <div><label for="mCategoria">Categoría</label><div class="cat-row"><select id="mCategoria" name="categoria"></select><button type="button" class="btn-sm" id="mSugerir" title="Sugerir categoría a partir de la descripción">✨ Sugerir</button></div><div class="sugerencia muted" id="mSugerencia" hidden></div></div>
       <div><label for="mCuenta">Cuenta (opcional)</label><input id="mCuenta" name="cuenta" list="cuentasList" placeholder="p. ej. Banco, Efectivo"><datalist id="cuentasList"></datalist></div>
       <div class="full"><label for="mDescripcion">Descripción</label><input id="mDescripcion" name="descripcion" placeholder="p. ej. Mercadona"></div>
+      <div id="rowVehiculo" hidden>
+        <label for="mVehiculo">Vehículo (opcional)</label>
+        <div class="cat-row"><select id="mVehiculo" name="mVehiculo"></select><button type="button" class="btn-sm" id="mNuevoVeh">＋ Vehículo</button></div>
+        <p class="muted small" id="mVehiculoAviso" hidden style="margin:4px 0 0">Hay varios vehículos: elige uno si este gasto es del coche.</p>
+      </div>
       <div id="rowNaturaleza"><label>Tipo de gasto</label>
         <div class="seg seg-sm"><input type="radio" name="naturaleza" id="natFijo" value="fijo"><label for="natFijo">Fijo</label><input type="radio" name="naturaleza" id="natVar" value="variable" checked><label for="natVar">Variable</label></div></div>
       <div id="rowTipoIngreso"><label for="mTipoIngreso">Tipo de ingreso</label><select id="mTipoIngreso" name="tipoIngreso"><option value="nomina">Nómina</option><option value="extra">Extra</option><option value="otro">Otro</option></select></div>
@@ -813,6 +832,28 @@
   </div>
 </dialog>
 
+
+<dialog id="asigVehDialog">
+  <form id="asigVehForm" method="dialog">
+    <h3>Asignar gastos a un vehículo</h3>
+    <p class="muted small">Gastos que parecen del coche y aún no tienen vehículo. Márcalos y elige la matrícula.</p>
+    <div class="form-grid">
+      <div class="full"><label for="asigVehSel">Asignar a</label><select id="asigVehSel" required></select></div>
+    </div>
+    <div class="table-wrap" style="max-height:40vh;overflow:auto;margin:12px 0">
+      <table>
+        <thead><tr><th><input type="checkbox" id="asigVehTodos" title="Marcar todos"></th><th>Fecha</th><th>Concepto</th><th class="num">Importe</th></tr></thead>
+        <tbody id="asigVehBody"></tbody>
+      </table>
+    </div>
+    <p class="error" id="asigVehError" style="display:none"></p>
+    <div class="dialog-actions">
+      <button type="button" data-close>Cancelar</button>
+      <button type="submit" class="btn-primary" id="asigVehOk">Asignar</button>
+    </div>
+  </form>
+</dialog>
+
 <div class="toast" id="toast"></div>
 
 <!-- Configuración (pon aquí tu GOOGLE_CLIENT_ID) -->
@@ -826,6 +867,7 @@
 <script src="js/prevision-core.js"></script>
 <script src="js/periodos-core.js"></script>
 <script src="js/fuel-core.js"></script>
+<script src="js/vehiculos-core.js"></script>
 <script src="js/attachments.js"></script>
 <script src="js/ocr.js"></script>
 <script src="js/ocr-gemini.js"></script>

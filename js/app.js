@@ -121,6 +121,7 @@ const NORMALIZAR = {
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
     if (mov.tipo === 'ingreso' && m.previstoId) mov.previstoId = String(m.previstoId);   // v3.9: cumple este ingreso previsto (paga extra, productividad…)
     if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
+    if (mov.tipo === 'gasto' && m.vehiculoId) mov.vehiculoId = String(m.vehiculoId);     // v3.10: gasto del vehículo (seguro, ITV, taller…; también en repostajes)
     if (mov.tipo === 'gasto' && m.traspasoId) mov.traspasoId = String(m.traspasoId);     // comisión de un traspaso entre cuentas (v3.4)
     return conCuenta(mov, m);
   },
@@ -310,7 +311,13 @@ const Store = {
     // Borrar el gasto de un repostaje borra su repostaje. Borrar un vehículo borra sus repostajes,
     // pero NO sus gastos (siguen contando en los totales del mes).
     if (col === 'movimientos') this.state.repostajes.filter(r => !r.deleted && r.movimientoId === id).forEach(r => this._del('repostajes', r.id, t));
-    if (col === 'vehiculos') this.state.repostajes.filter(r => !r.deleted && r.vehiculoId === id).forEach(r => this._del('repostajes', r.id, t));
+    if (col === 'vehiculos') {
+      this.state.repostajes.filter(r => !r.deleted && r.vehiculoId === id).forEach(r => this._del('repostajes', r.id, t));
+      // v3.10: los gastos se conservan, solo se les quita la asignación
+      this.state.movimientos.filter(m => !m.deleted && m.vehiculoId === id).forEach(m => {
+        const rec = { ...m }; delete rec.vehiculoId; this._put('movimientos', rec, t);
+      });
+    }
     // v3.4: borrar un traspaso borra el gasto de su comisión; borrar ese gasto deja el traspaso sin comisión
     if (col === 'traspasos' && old.comisionMovId) this._del('movimientos', old.comisionMovId, t);
     if (col === 'movimientos') this.state.traspasos.filter(x => !x.deleted && x.comisionMovId === id).forEach(x => this._put('traspasos', { ...x, comision: 0, comisionMovId: null }, t));
@@ -865,6 +872,10 @@ function badges(m) {
   if (m.recurrenteId) out.push('<span class="badge b-rec" title="Generado por un movimiento recurrente">🔁</span>');
   const rp = typeof repostajeDeMov === 'function' ? repostajeDeMov(m) : null;
   if (rp) { const v = Store.get('vehiculos', rp.vehiculoId); out.push(`<span class="badge b-comb" title="Repostaje: ${fmtLitros(rp.litros)} a ${fmtPrecioL(rp.precioLitro)}">⛽ ${esc(v ? v.matricula : '')}</span>`); }
+  else if (m.vehiculoId) {
+    const v = Store.get('vehiculos', m.vehiculoId);
+    out.push(`<span class="badge b-veh" title="Gasto del vehículo">${v ? '🚗 ' + esc(v.matricula) : '🚗 vehículo borrado'}</span>`);
+  }
   const n = Store.list('adjuntos').filter(a => a.ownerId === m.id).length;
   if (n) out.push(`<span class="badge b-adj" title="${n} adjunto(s)">📎${n > 1 ? n : ''}</span>`);
   return out.join(' ');
@@ -987,6 +998,7 @@ function syncMovOpciones() {
   const f = $('#movForm'), gasto = movTipo() === 'gasto';
   $('#rowNaturaleza').hidden = !gasto; $('#rowTipoIngreso').hidden = gasto;
   $('#rowPrevisto').hidden = gasto || !$('#mPrevisto').options.length || $('#mPrevisto').options.length < 2;   // v3.9
+  if ($('#rowVehiculo')) $('#rowVehiculo').hidden = !gasto;
   ['#optDeuda', '#optFin', '#optGar', '#optComb'].forEach(s => $(s).hidden = !gasto);
   // un repostaje no es pago de deuda, ni compra financiada, ni recurrente
   const comb = gasto && f.esComb.checked;
@@ -1069,6 +1081,7 @@ function openMovDialog(mov, preset = {}) {
   $('#ocrPanel').hidden = true; $('#ocrPanel').innerHTML = '';
   MovDlg.adj = AdjUI.abrir('#movAdj', { ownerType: 'movimiento', ownerId: mov?.id || uid() });
   combAbrir(mov, preset);   // repostaje de combustible (vehiculos.js)
+  if (typeof vehMovAbrir === 'function') vehMovAbrir(mov, preset);   // v3.10: selector Vehículo
   syncMovOpciones();
   $('#movDialog').showModal(); setTimeout(() => f.importe.focus(), 30);
 }
@@ -1078,6 +1091,7 @@ $('#mCategoria').addEventListener('change', e => { // por defecto según la cate
   if (movTipo() === 'gasto' && !f.id.value) f.querySelector(`input[name="naturaleza"][value="${naturalezaPorDefecto(e.target.value)}"]`).checked = true;
   if (movTipo() === 'ingreso' && !f.id.value) $('#mTipoIngreso').value = tipoIngresoPorDefecto(e.target.value);
   if (movTipo() === 'gasto' && !f.esComb.checked && FuelCore.esCategoriaCombustible(e.target.value) && !f.esPago.checked && !f.esFin.checked) { f.esComb.checked = true; syncMovOpciones(); }
+  if (typeof vehMovSugerir === 'function') vehMovSugerir();
 });
 ['esPago', 'esFin', 'esGar', 'esRec'].forEach(n => $('#movForm')[n].addEventListener('change', () => {
   const f = $('#movForm');
@@ -1125,7 +1139,7 @@ $('#movForm').addEventListener('submit', async e => {
   }
   if (!mov.id) mov.id = MovDlg.adj.owner.ownerId;
   // Repostaje de combustible -> registro en «repostajes» enlazado a este gasto
-  delete mov.repostajeId;
+  delete mov.repostajeId; delete mov.vehiculoId;
   if (gasto && f.esComb.checked) {
     const r = combLeer(mov, importe);
     if (r.error) return err(r.error);
@@ -1137,6 +1151,10 @@ $('#movForm').addEventListener('submit', async e => {
   } else if (MovDlg.rep) {
     if (!confirm('Has quitado «Repostaje»: se borrarán los datos de litros y km de este gasto (el gasto se conserva). ¿Continuar?')) return;
     cambios.push({ col: 'repostajes', del: MovDlg.rep.id });
+  }
+  if (gasto) {
+    const vid = (f.esComb.checked ? f.cVehiculo.value : ($('#mVehiculo') && $('#mVehiculo').value)) || '';
+    if (vid) mov.vehiculoId = vid;
   }
   // Compra financiada -> deuda
   if (gasto && f.esFin.checked) {

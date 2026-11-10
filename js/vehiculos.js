@@ -1,5 +1,5 @@
 /* =========================================================
-   Vehículos y combustible (v3.3)
+   Vehículos, combustible y resto de gastos del coche (v3.3, v3.10)
    - Colección «vehiculos»: matrícula (única), nombre, combustible,
      capacidad del depósito, cuentakilómetros inicial, en uso.
    - Colección «repostajes»: cada uno enlazado a un gasto normal
@@ -58,7 +58,8 @@ $('#vehForm').addEventListener('submit', async e => {
 $('#vehDelete').addEventListener('click', async () => {
   const v = VehDlg.v; if (!v) return;
   const n = Store.list('repostajes').filter(r => r.vehiculoId === v.id).length;
-  if (!confirm(`¿Eliminar el vehículo ${v.matricula}?${n ? `\n\nSe borrarán los datos de sus ${n} repostajes (litros, km y consumos), pero los gastos se conservan en Movimientos.` : ''}\n\nSi lo has vendido, mejor desmarca «En uso» y conservarás sus estadísticas.`)) return;
+  const g = Store.getMovimientos().filter(m => m.vehiculoId === v.id).length;
+  if (!confirm(`¿Eliminar el vehículo ${v.matricula}?${n ? `\n\nSe borrarán los datos de sus ${n} repostajes (litros, km y consumos).` : ''}${g || n ? '\n\nLos gastos (combustible, seguro, taller…) se conservan en Movimientos, sin asignación a este vehículo.' : ''}\n\nSi lo has vendido, mejor desmarca «En uso» y conservarás sus estadísticas.`)) return;
   await Store.remove('vehiculos', v.id);
   if (Veh.filtro === v.id) Veh.filtro = '';
   $('#vehDialog').close(); toast('Vehículo eliminado');
@@ -179,11 +180,15 @@ function combLeer(mov, importe) {
 }
 
 /* ---------------- Pestaña Vehículos ---------------- */
-const Veh = { filtro: '', periodo: '12m', todos: false };
+const Veh = { filtro: '', periodo: 'app', todos: false };
 function periodoVeh() {
   const hoy = todayISO();
   if (Veh.periodo === '12m') return { desde: FC.addDaysISO(FC.addMonthsISO(hoy, -12), 1), hasta: hoy, texto: 'últimos 12 meses' };
   if (/^\d{4}$/.test(Veh.periodo)) return { desde: Veh.periodo + '-01-01', hasta: Veh.periodo + '-12-31', texto: Veh.periodo };
+  if (Veh.periodo === 'todo') return { desde: null, hasta: null, texto: 'todo el historial' };
+  // Por defecto: el periodo o año seleccionado arriba (nómina, mes o año)
+  const P = typeof periodo === 'function' ? periodo() : null;
+  if (P && P.desde && P.hasta) return { desde: P.desde, hasta: P.hasta, texto: P.label || P.nombre || 'este periodo' };
   return { desde: null, hasta: null, texto: 'todo el historial' };
 }
 function renderVehiculos() {
@@ -191,9 +196,11 @@ function renderVehiculos() {
   if (Veh.filtro && !vehs.some(v => v.id === Veh.filtro)) Veh.filtro = '';
   $('#vehFiltro').innerHTML = `<option value="">Todos los vehículos</option>` + vehs.map(v => `<option value="${v.id}">${esc(nombreVeh(v))}${v.activo ? '' : ' (no en uso)'}</option>`).join('');
   $('#vehFiltro').value = Veh.filtro;
-  const anios = [...new Set(reps.map(r => r.fecha.slice(0, 4)))].sort().reverse();
-  if (/^\d{4}$/.test(Veh.periodo) && !anios.includes(Veh.periodo)) Veh.periodo = '12m';
-  $('#vehPeriodo').innerHTML = `<option value="12m">Últimos 12 meses</option>${anios.map(a => `<option value="${a}">${a}</option>`).join('')}<option value="todo">Todo</option>`;
+  const fechasG = Store.getMovimientos().filter(m => m.tipo === 'gasto').map(m => m.fecha);
+  const anios = [...new Set([...reps.map(r => r.fecha.slice(0, 4)), ...fechasG.map(f => f.slice(0, 4))])].filter(Boolean).sort().reverse();
+  if (/^\d{4}$/.test(Veh.periodo) && !anios.includes(Veh.periodo)) Veh.periodo = 'app';
+  const labApp = (typeof periodo === 'function' && periodo().label) ? ('Este periodo · ' + periodo().label) : 'Este periodo';
+  $('#vehPeriodo').innerHTML = `<option value="app">${esc(labApp)}</option><option value="12m">Últimos 12 meses</option>${anios.map(a => `<option value="${a}">${a}</option>`).join('')}<option value="todo">Todo</option>`;
   $('#vehPeriodo').value = Veh.periodo;
   const sel = Veh.filtro ? vehs.filter(v => v.id === Veh.filtro) : vehs, per = periodoVeh();
   const res = FuelCore.resumen(sel, reps, per), t = res.total;
@@ -213,6 +220,8 @@ function renderVehiculos() {
   $('#vkUltimo').textContent = u ? fmtFecha(u.fecha) : '—';
   $('#vkUltimoSub').textContent = u ? `${sel.length > 1 ? (Store.get('vehiculos', u.vehiculoId) || {}).matricula + ' · ' : ''}${fmtLitros(u.litros)} · ${fmtPrecioL(u.precioLitro)}` : '';
 
+  renderCosteVehiculos(sel, per, t);
+
   // Tarjetas de vehículos (siempre todos; con todo el historial)
   $('#vehLista').innerHTML = vehs.length ? `<div class="veh-list">${vehs.map(v => {
     const m = FuelCore.metricasVehiculo(v, reps);
@@ -223,7 +232,8 @@ function renderVehiculos() {
         <div><span>€/km</span><strong>${m.eurKm === null ? '—' : fmtP3.format(m.eurKm)}</strong></div>
         <div><span>L/100 km</span><strong>${m.l100 === null ? '—' : fmtL.format(m.l100)}${m.aproximado ? '*' : ''}</strong></div>
         <div><span>€/L medio</span><strong>${m.precioMedio === null ? '—' : fmtP3.format(m.precioMedio)}</strong></div>
-        <div><span>Gasto total</span><strong>${eur(m.gasto)}</strong></div>
+        <div><span>Combustible</span><strong>${eur(m.gasto)}</strong></div>
+        <div><span>Coste total</span><strong>${eur((VehiculosCore.costeVehiculo({ vehiculoId: v.id, movimientos: Store.getMovimientos(), repostajes: reps, desde: per.desde, hasta: per.hasta, hoy: todayISO() }).total))}</strong></div>
         <div><span>Autonomía</span><strong>${m.autonomia ? fmtKm(m.autonomia) : '—'}</strong></div>
         <div><span>Cuentakm</span><strong>${m.odometroEstimado === null ? '—' : fmtInt.format(m.odometroEstimado)}</strong></div>
       </div>
@@ -294,6 +304,7 @@ document.addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t) return;
   const d = t.dataset;
   if (d.vehEdit) openVehDialog(Store.get('vehiculos', d.vehEdit));
+  if (d.vehMov) { const m = Store.get('movimientos', d.vehMov); if (m) openMovDialog(m); }
   if (d.vehRep) nuevoRepostaje(d.vehRep);
   if (t.id === 'repMasBtn') { Veh.todos = !Veh.todos; renderVehiculos(); }
   if (d.vehVer) { Veh.filtro = Veh.filtro === d.vehVer ? '' : d.vehVer; renderVehiculos(); }
@@ -310,3 +321,140 @@ document.addEventListener('click', async e => {
     toast('Repostaje eliminado');
   }
 });
+
+
+/* ---------------- v3.10: gastos del vehículo y asignación ---------------- */
+const VehMov = { tocado: false };
+
+function llenarSelectMovVehiculo(sel) {
+  const el = $('#mVehiculo'); if (!el) return;
+  const lista = vehiculosOrdenados().filter(v => v.activo || v.id === sel);
+  el.innerHTML = `<option value="">Ninguno</option>` + lista.map(v => `<option value="${v.id}">${esc(nombreVeh(v))}${v.activo ? '' : ' (no en uso)'}</option>`).join('');
+  el.value = (sel && lista.some(v => v.id === sel)) ? sel : '';
+}
+
+function vehMovAbrir(mov, preset = {}) {
+  const f = $('#movForm');
+  VehMov.tocado = false;
+  const reps = Store.list('repostajes');
+  const ya = mov ? (VehiculosCore.vehiculoDeMov(mov, reps) || mov.vehiculoId || '') : (preset.vehiculoId || '');
+  llenarSelectMovVehiculo(ya);
+  const av = $('#mVehiculoAviso'); if (av) av.hidden = true;
+  if (!mov && !preset.vehiculoId && !preset.repostaje && !preset.rep) vehMovSugerir(true);
+  else if (ya) { const el = $('#mVehiculo'); if (el) el.value = ya; }
+}
+
+function vehMovSugerir(inicial) {
+  const f = $('#movForm'); if (!f || movTipo() !== 'gasto' || f.id.value || f.esComb.checked) return;
+  if (VehMov.tocado && !inicial) return;
+  const av = $('#mVehiculoAviso');
+  const sug = VehiculosCore.sugerirVehiculo({ tipo: 'gasto', categoria: f.categoria.value, descripcion: f.descripcion.value }, Store.list('vehiculos'));
+  if (sug && sug.vehiculoId) {
+    llenarSelectMovVehiculo(sug.vehiculoId);
+    if (av) av.hidden = true;
+  } else {
+    if (!VehMov.tocado) llenarSelectMovVehiculo('');
+    if (av) av.hidden = !(sug && sug.aviso);
+  }
+}
+
+function renderCosteVehiculos(sel, per, comb) {
+  const movs = Store.getMovimientos(), reps = Store.list('repostajes');
+  const costes = sel.map(v => ({ v, c: VehiculosCore.costeVehiculo({ vehiculoId: v.id, movimientos: movs, repostajes: reps, desde: per.desde, hasta: per.hasta, hoy: todayISO() }) }));
+  const total = costes.reduce((s, x) => s + x.c.total, 0);
+  const km = costes.reduce((s, x) => s + (x.c.km || 0), 0);
+  const porGrupo = {};
+  const noComb = [];
+  for (const x of costes) {
+    for (const [g, n] of Object.entries(x.c.porGrupo)) porGrupo[g] = (porGrupo[g] || 0) + n;
+    for (const g of x.c.noCombustible) noComb.push({ ...g, matricula: x.v.matricula, vehiculoId: x.v.id });
+  }
+  const meses = costes.reduce((m, x) => Math.max(m, x.c.meses || 0), 0);
+  const media = meses > 0 ? total / meses : null;
+  const eurKm = km > 0 ? total / km : null;
+  if ($('#vkTotal')) $('#vkTotal').textContent = eur(total);
+  if ($('#vkTotalSub')) $('#vkTotalSub').textContent = `${noComb.length} gasto${noComb.length === 1 ? '' : 's'} + combustible · ${per.texto}`;
+  if ($('#vkMedia')) $('#vkMedia').textContent = media === null ? '—' : eur(media);
+  if ($('#vkMediaSub')) $('#vkMediaSub').textContent = media === null ? per.texto : `en ${meses} mes${meses === 1 ? '' : 'es'}`;
+  if ($('#vkEurKmAll')) $('#vkEurKmAll').textContent = eurKm === null ? '—' : fmtEurKm(eurKm);
+  if ($('#vkEurKmAllSub')) $('#vkEurKmAllSub').textContent = eurKm === null ? 'Anota los km al repostar' : `${fmtInt.format(km)} km · todos los gastos`;
+
+  const grupos = Object.entries(porGrupo).sort((a, b) => b[1] - a[1]);
+  if ($('#vehDesglose')) {
+    $('#vehDesglose').innerHTML = grupos.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Concepto</th><th class="num">Importe</th><th class="num">%</th></tr></thead><tbody>${
+          grupos.map(([g, n]) => `<tr><td>${esc(g)}</td><td class="num neg">${eur(n)}</td><td class="num muted">${total ? Math.round(n * 1000 / total) / 10 : 0} %</td></tr>`).join('')
+        }<tr><th>Total</th><th class="num">${eur(total)}</th><th></th></tr></tbody></table></div>`
+      : '<p class="empty">Sin gastos de vehículo en este periodo. Asigna gastos con «Asignar gastos» o elige el vehículo al apuntarlos.</p>';
+  }
+  noComb.sort((a, b) => b.fecha.localeCompare(a.fecha));
+  if ($('#vehGastosBody')) {
+    $('#vehGastosBody').innerHTML = noComb.length ? noComb.map(g => `<tr>
+      <td class="nowrap">${fmtFecha(g.fecha)}</td>
+      <td>${esc(g.descripcion || g.grupo)}${sel.length > 1 ? ` <span class="muted small mono">${esc(g.matricula)}</span>` : ''}</td>
+      <td class="hide-sm">${esc(g.categoria)}</td>
+      <td class="num neg">${eur(g.importe)}</td>
+      <td class="actions"><button class="btn-sm" data-veh-mov="${g.id}" title="Editar">✏️</button></td>
+    </tr>`).join('') : `<tr><td colspan="5" class="empty">No hay gastos (aparte del combustible) asignados a ${sel.length === 1 ? 'este vehículo' : 'tus vehículos'} en este periodo.</td></tr>`;
+  }
+  renderGraficoCoste(grupos, total);
+}
+
+function renderGraficoCoste(grupos, total) {
+  const vacio = $('#chartCosteVehEmpty'), canvas = $('#chartCosteVeh');
+  if (!vacio || !canvas) return;
+  const hay = grupos.length && total > 0;
+  vacio.style.display = hay ? 'none' : 'flex';
+  if (UI.charts.costeVeh) { UI.charts.costeVeh.destroy(); delete UI.charts.costeVeh; }
+  if (!hay) return;
+  const colores = [cssVar('--primary'), cssVar('--warn'), cssVar('--danger'), cssVar('--ok'), '#6366f1', '#ec4899', '#0ea5e9', '#84cc16'];
+  UI.charts.costeVeh = new Chart(canvas, {
+    type: 'doughnut',
+    data: { labels: grupos.map(g => g[0]), datasets: [{ data: grupos.map(g => Math.round(g[1] * 100) / 100), backgroundColor: grupos.map((_, i) => colores[i % colores.length]) }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: cssVar('--text'), boxWidth: 12 } },
+      tooltip: { callbacks: { label: c => `${c.label}: ${eur(c.parsed)}` } } } }
+  });
+}
+
+function abrirAsignarGastos() {
+  const vehs = vehiculosOrdenados().filter(v => v.activo);
+  const err = m => { const p = $('#asigVehError'); p.textContent = m || ''; p.style.display = m ? '' : 'none'; };
+  err('');
+  if (!vehs.length) { toast('Añade primero un vehículo'); return openVehDialog(); }
+  const cand = VehiculosCore.candidatosSinVehiculo(Store.getMovimientos(), Store.list('repostajes'));
+  $('#asigVehSel').innerHTML = vehs.map(v => `<option value="${v.id}">${esc(nombreVeh(v))}</option>`).join('');
+  if (Veh.filtro && vehs.some(v => v.id === Veh.filtro)) $('#asigVehSel').value = Veh.filtro;
+  $('#asigVehBody').innerHTML = cand.length ? cand.map(m => `<tr>
+    <td><input type="checkbox" class="asig-veh-item" value="${m.id}" checked></td>
+    <td class="nowrap">${fmtFecha(m.fecha)}</td>
+    <td>${esc(m.descripcion || m.categoria)} <div class="muted small">${esc(m.categoria)}</div></td>
+    <td class="num neg">${eur(m.importe)}</td>
+  </tr>`).join('') : '<tr><td colspan="4" class="empty">No hay gastos sin vehículo que parezcan del coche. Puedes asignar cualquiera desde el diálogo del movimiento (selector «Vehículo»).</td></tr>';
+  const todos = $('#asigVehTodos'); if (todos) todos.checked = cand.length > 0;
+  $('#asigVehDialog').showModal();
+}
+
+{
+  const f = $('#movForm');
+  if ($('#mVehiculo')) $('#mVehiculo').addEventListener('change', () => { VehMov.tocado = true; if ($('#mVehiculoAviso')) $('#mVehiculoAviso').hidden = true; });
+  if ($('#mDescripcion')) $('#mDescripcion').addEventListener('change', () => vehMovSugerir());
+  if ($('#mDescripcion')) $('#mDescripcion').addEventListener('blur', () => vehMovSugerir());
+  if ($('#mNuevoVeh')) $('#mNuevoVeh').addEventListener('click', () => openVehDialog(null, v => { llenarSelectMovVehiculo(v.id); if (f.cVehiculo) { llenarSelectVehiculos(v.id); combSync(); } VehMov.tocado = true; }));
+  const prev = f.esComb && f.esComb.onchange;
+  f.esComb.addEventListener('change', () => {
+    if (f.esComb.checked && f.cVehiculo && f.cVehiculo.value && $('#mVehiculo')) { llenarSelectMovVehiculo(f.cVehiculo.value); VehMov.tocado = true; }
+  });
+  if ($('#asigVehBtn')) $('#asigVehBtn').addEventListener('click', abrirAsignarGastos);
+  if ($('#asigVehTodos')) $('#asigVehTodos').addEventListener('change', e => $$('#asigVehBody .asig-veh-item').forEach(c => { c.checked = e.target.checked; }));
+  if ($('#asigVehForm')) $('#asigVehForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const vid = $('#asigVehSel').value;
+    if (!vid) { $('#asigVehError').textContent = 'Elige un vehículo.'; $('#asigVehError').style.display = ''; return; }
+    const ids = $$('#asigVehBody .asig-veh-item').filter(c => c.checked).map(c => c.value);
+    if (!ids.length) { $('#asigVehError').textContent = 'Marca al menos un gasto.'; $('#asigVehError').style.display = ''; return; }
+    const cambios = ids.map(id => { const m = Store.get('movimientos', id); return m ? { col: 'movimientos', rec: { ...m, vehiculoId: vid } } : null; }).filter(Boolean);
+    await Store.apply(cambios);
+    $('#asigVehDialog').close();
+    toast(cambios.length === 1 ? 'Gasto asignado' : `${cambios.length} gastos asignados`);
+  });
+}

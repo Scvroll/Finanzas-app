@@ -45,6 +45,8 @@
       if (m.garantia) o.garantia = { producto: m.garantia.producto || '', anios: m.garantia.anios };
       const rp = repDeMovPre[m.id];
       if (rp) { const v = vehPre[rp.vehiculoId]; o.repostaje = { id: rp.id, vehiculoId: rp.vehiculoId, matricula: v ? v.matricula : '', litros: rp.litros, precioLitro: rp.precioLitro, kmTanqueAnterior: rp.kmTanqueAnterior ?? null, odometro: rp.odometro ?? null, lleno: rp.lleno !== false }; }
+      const vid = m.vehiculoId || (rp && rp.vehiculoId) || '';
+      if (vid) { const v = vehPre[vid]; o.vehiculoId = vid; o.vehiculo = v ? v.matricula : ''; }
       const n = nAdj(m.id); if (n) o.adjuntos = n;
       return o;
     });
@@ -179,7 +181,7 @@
     const q = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'cuenta_id', 'traspaso_id', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
     const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.cuentaId || '', m.comisionDeTraspasoId || '', m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
-      m.repostaje ? m.repostaje.matricula : '', m.repostaje ? m.repostaje.litros : '', m.repostaje ? m.repostaje.precioLitro : '', m.repostaje ? m.repostaje.kmTanqueAnterior ?? '' : '', m.repostaje ? m.repostaje.odometro ?? '' : '', m.repostaje ? (m.repostaje.lleno ? 'si' : 'no') : ''].map(q).join(','));
+      m.vehiculo || (m.repostaje ? m.repostaje.matricula : '') || '', m.repostaje ? m.repostaje.litros : '', m.repostaje ? m.repostaje.precioLitro : '', m.repostaje ? m.repostaje.kmTanqueAnterior ?? '' : '', m.repostaje ? m.repostaje.odometro ?? '' : '', m.repostaje ? (m.repostaje.lleno ? 'si' : 'no') : ''].map(q).join(','));
     const csv = '\ufeff' + [cols.join(','), ...filas].join('\r\n') + '\r\n';
     return { json, csv };
   }
