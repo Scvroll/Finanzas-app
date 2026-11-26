@@ -20,8 +20,8 @@
   // v3.4 añade cuentas, traspasos (entre cuentas), regularizaciones («Ajustar saldo») y traspasosFondos.
   const COLLECTIONS = ['movimientos', 'inversiones', 'recurrentes', 'deudas', 'adjuntos', 'activos', 'operaciones', 'precios', 'vehiculos', 'repostajes',
     'cuentas', 'traspasos', 'regularizaciones', 'traspasosFondos', 'previstos'];   // v3.9: previstos (presupuestos e ingresos previstos)
-  // Lápidas que no se purgan nunca: los movimientos generados por plantillas recurrentes tienen id
-  // determinista y se volverían a generar si su lápida desapareciera.
+  // Lápidas que no se purgan nunca: los movimientos con id rec_* (generados en versiones
+  // anteriores o al marcar «Repetir cada mes») conservan ese id determinista.
   const NO_PURGAR = /^rec_/;
   const TOMBSTONE_TTL_MS = 180 * 24 * 3600 * 1000; // las lápidas se purgan a los 180 días
 

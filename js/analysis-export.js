@@ -40,6 +40,7 @@
       if (m.traspasoId) o.comisionDeTraspasoId = m.traspasoId;
       if (m.tipo === 'gasto') o.naturaleza = m.naturaleza || 'variable'; else o.tipoIngreso = m.tipoIngreso || 'otro';
       if (m.recurrenteId) o.recurrenteId = m.recurrenteId;
+      if (m.recurrentePeriodo) o.recurrentePeriodo = m.recurrentePeriodo;
       if (m.deudaId) { o.deudaId = m.deudaId; o.cuotaN = m.cuotaN; if (m.desglose) o.desgloseCuota = m.desglose; }
       if (m.financiadoPor) o.financiadoPor = m.financiadoPor;
       if (m.garantia) o.garantia = { producto: m.garantia.producto || '', anios: m.garantia.anios };
@@ -179,8 +180,8 @@
     };
 
     const q = v => { const s = String(v ?? ''); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'cuenta_id', 'traspaso_id', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
-    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.cuentaId || '', m.comisionDeTraspasoId || '', m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
+    const cols = ['id', 'fecha', 'tipo', 'importe', 'importe_con_signo', 'categoria', 'descripcion', 'cuenta', 'cuenta_id', 'traspaso_id', 'naturaleza', 'tipo_ingreso', 'recurrente_id', 'recurrente_periodo', 'deuda_id', 'cuota_n', 'interes_cuota', 'financiado_por', 'garantia_producto', 'garantia_anios', 'vehiculo', 'litros', 'precio_litro', 'km_tanque_anterior', 'cuentakm', 'lleno'];
+    const filas = movimientos.map(m => [m.id, m.fecha, m.tipo, m.importe.toFixed(2), (m.tipo === 'gasto' ? -m.importe : m.importe).toFixed(2), m.categoria, m.descripcion, m.cuenta, m.cuentaId || '', m.comisionDeTraspasoId || '', m.naturaleza || '', m.tipoIngreso || '', m.recurrenteId || '', m.recurrentePeriodo || '', m.deudaId || '', m.cuotaN || '', m.desgloseCuota ? r2(m.desgloseCuota.interes).toFixed(2) : '', m.financiadoPor || '', m.garantia ? m.garantia.producto : '', m.garantia ? m.garantia.anios : '',
       m.vehiculo || (m.repostaje ? m.repostaje.matricula : '') || '', m.repostaje ? m.repostaje.litros : '', m.repostaje ? m.repostaje.precioLitro : '', m.repostaje ? m.repostaje.kmTanqueAnterior ?? '' : '', m.repostaje ? m.repostaje.odometro ?? '' : '', m.repostaje ? (m.repostaje.lleno ? 'si' : 'no') : ''].map(q).join(','));
     const csv = '\ufeff' + [cols.join(','), ...filas].join('\r\n') + '\r\n';
     return { json, csv };

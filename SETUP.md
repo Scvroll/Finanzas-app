@@ -108,6 +108,11 @@ Fuentes oficiales (consultadas el 30/10/2026): [OAuth App Verification Help Cent
 
 Si cambias archivos de la app más adelante, sube también el número de `VERSION` en `sw.js` para que los navegadores descarguen la versión nueva.
 
+### Actualizar a la v3.11.0 (recurrentes vinculados, ya no se crean solos)
+
+- Sube los archivos cambiados: `index.html`, `sw.js`, `README.md`, `SETUP.md`, `js/config.js`, `js/finance-core.js`, `js/prevision-core.js`, `js/prevision.js`, `js/app.js`, `js/app-extra.js`, `js/main.js`, `js/analysis-export.js`, `js/sync-core.js` (en `sw.js`, `VERSION = 'finanzas-v3.11.0'`).
+- Los datos no se pierden: los movimientos que la app había generado (`rec_…`) quedan vinculados a su plantilla y mes. A partir de ahora los apuntas tú.
+
 ### Actualizar a la v3.10.0 (todos los gastos del vehículo)
 
 - Sube los archivos cambiados, incluido el nuevo **`js/vehiculos-core.js`**: `index.html`, `css/styles.css`, `sw.js`, `README.md`, `SETUP.md`, `js/config.js`, `js/app.js`, `js/vehiculos.js`, `js/vehiculos-core.js`, `js/analysis-export.js`, `js/main.js` (en `sw.js`, `VERSION = 'finanzas-v3.10.0'`).

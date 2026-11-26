@@ -20,11 +20,10 @@ Store.onChange(() => { renderAll(); renderSync(); });
   notificarGarantias();
   limpiarAdjuntosHuerfanos();
 })();
-// Al volver a la app (o al cambiar de día) se crean los recurrentes que toquen
+// Al volver a la app (o al cambiar de día) se actualiza la vista; los recurrentes ya no se crean solos (v3.11)
 let ultimoDia = todayISO();
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
-  if (Store.generarRecurrentes()) toast('Se han añadido los movimientos recurrentes del mes');
   if (ultimoDia !== todayISO()) { ultimoDia = todayISO(); renderAll(); notificarGarantias(); }
 });
 /** Borra de IndexedDB los archivos que ya no tienen registro (p. ej. adjuntos de un diálogo que se cerró sin guardar). */
@@ -41,4 +40,4 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
 }
 
 // API para pruebas / consola
-window.FinanzasApp = { Store, Sync, FileSync, Auth, localCache, normalizeState, Calc, UI, setMes, showView, parseImporte, generarDatosEjemplo, movimientosCSV, AdjUI, OCR, openMovDialog, openCuadro, openDetalle, planCSV, todayISO, setNomina, setVista, periodo, Sobrante: typeof Sobrante !== 'undefined' ? Sobrante : null, VehiculosCore: typeof VehiculosCore !== 'undefined' ? VehiculosCore : null };
+window.FinanzasApp = { Store, Sync, FileSync, Auth, localCache, normalizeState, Calc, UI, setMes, showView, parseImporte, generarDatosEjemplo, movimientosCSV, AdjUI, OCR, openMovDialog, abrirRegistroRecurrente, openCuadro, openDetalle, planCSV, todayISO, setNomina, setVista, periodo, Sobrante: typeof Sobrante !== 'undefined' ? Sobrante : null, VehiculosCore: typeof VehiculosCore !== 'undefined' ? VehiculosCore : null };

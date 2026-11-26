@@ -119,6 +119,9 @@ const NORMALIZAR = {
       if (mov.tipoIngreso === 'nomina' && ['pendiente', 'traspasado', 'acumulado'].includes(m.sobrante)) mov.sobrante = m.sobrante;
     }
     if (m.recurrenteId) mov.recurrenteId = String(m.recurrenteId);
+    if (/^\d{4}-\d{2}$/.test(m.recurrentePeriodo || '')) mov.recurrentePeriodo = m.recurrentePeriodo;
+    const vin = FC.vinculoRecurrente({ ...mov, id: mov.id, fecha: mov.fecha, recurrenteId: mov.recurrenteId, recurrentePeriodo: mov.recurrentePeriodo });
+    if (vin) { mov.recurrenteId = vin.recurrenteId; if (vin.recurrentePeriodo) mov.recurrentePeriodo = vin.recurrentePeriodo; }
     if (mov.tipo === 'ingreso' && m.previstoId) mov.previstoId = String(m.previstoId);   // v3.9: cumple este ingreso previsto (paga extra, productividad…)
     if (mov.tipo === 'gasto' && m.repostajeId) mov.repostajeId = String(m.repostajeId);   // gasto de un repostaje (v3.3)
     if (mov.tipo === 'gasto' && m.vehiculoId) mov.vehiculoId = String(m.vehiculoId);     // v3.10: gasto del vehículo (seguro, ITV, taller…; también en repostajes)
@@ -239,6 +242,7 @@ function normalizeState(s) {
     out[c] = (Array.isArray(s[c]) ? s[c] : []).filter(r => r && typeof r === 'object').map(r => {
       if (r.deleted) return r.id ? tombstone(r.id, ts(r), r.driveId ? { driveId: r.driveId } : {}) : null;
       const n = NORMALIZAR[c](r);
+      if (n && c === 'movimientos' && n.recurrentePeriodo && r.recurrentePeriodo !== n.recurrentePeriodo) normalizeState.migrado = true;
       return n ? { ...n, updatedAt: ts(r) } : null;
     }).filter(r => r && !vistos.has(r.id) && vistos.add(r.id));
   }
@@ -331,14 +335,11 @@ const Store = {
   },
   put(col, rec) { return this.apply([{ col, rec }]).then(r => r[0]); },
   remove(col, id) { return this.apply([{ col, del: id }]); },
-  /** Crea los movimientos de las plantillas recurrentes que falten hasta hoy (ids deterministas: sin duplicados). */
+  /** v3.11: ya no crea movimientos. Solo rellena el vínculo (recurrenteId + periodo) en los que ya existían. Devuelve 0 para no disparar toasts antiguos. */
   generarRecurrentes(persistir = true) {
-    const nuevos = FC.generarRecurrentes(this.state.recurrentes, this.state.movimientos, todayISO());
-    if (!nuevos.length) return 0;
-    // v3.8: una nómina recurrente nueva queda «pendiente» de decidir qué haces con lo que sobró del periodo anterior
-    nuevos.forEach(m => this.state.movimientos.push({ ...NORMALIZAR.movimientos({ ...m, ...(m.tipo === 'ingreso' && m.tipoIngreso === 'nomina' ? { sobrante: 'pendiente' } : {}) }), updatedAt: m.updatedAt }));
-    if (persistir) this.persist();
-    return nuevos.length;
+    const n = FC.migrarVinculosRecurrentes(this.state.movimientos);
+    if (n && persistir) this.persist();
+    return 0;
   },
 
   // Movimientos
@@ -869,7 +870,7 @@ function badges(m) {
   if (m.deudaId) out.push(`<span class="badge b-deuda" title="Pago de deuda${m.desglose ? ': intereses ' + eur(m.desglose.interes) + ', capital ' + eur(m.desglose.amortizacion) : ''}">Cuota${m.cuotaN ? ' ' + m.cuotaN : ''}</span>`);
   if (m.financiadoPor) out.push('<span class="badge b-fin" title="Compra a plazos: cuentan las cuotas, no este importe">Financiado</span>');
   if (m.garantia) out.push('<span class="badge b-gar" title="Tiene garantía">🛡️</span>');
-  if (m.recurrenteId) out.push('<span class="badge b-rec" title="Generado por un movimiento recurrente">🔁</span>');
+  if (m.recurrenteId) out.push('<span class="badge b-rec" title="Vinculado a un movimiento recurrente">🔁</span>');
   const rp = typeof repostajeDeMov === 'function' ? repostajeDeMov(m) : null;
   if (rp) { const v = Store.get('vehiculos', rp.vehiculoId); out.push(`<span class="badge b-comb" title="Repostaje: ${fmtLitros(rp.litros)} a ${fmtPrecioL(rp.precioLitro)}">⛽ ${esc(v ? v.matricula : '')}</span>`); }
   else if (m.vehiculoId) {
@@ -1013,7 +1014,7 @@ function syncMovOpciones() {
   f.esRec.disabled = gasto && (f.esPago.checked || f.esFin.checked || comb); if (f.esRec.disabled) f.esRec.checked = false;
   if (gasto && f.esFin.checked) previewFin('#movFin', parseImporte(f.importe.value));
   if (gasto && f.esGar.checked) actualizarVenceGarantia();
-  if (f.esRec.checked) $('#recInfo').textContent = f.fecha.value ? `Se creará automáticamente ${FC.textoDiaCobro(f.recUltimo.checked ? FC.DIA_ULTIMO : Number(f.fecha.value.slice(8)))}, a partir de ${monthLabel(monthKey(f.fecha.value))}.` : '';
+  if (f.esRec.checked) $('#recInfo').textContent = f.fecha.value ? `Se guardará como recurrente (${FC.textoDiaCobro(f.recUltimo.checked ? FC.DIA_ULTIMO : Number(f.fecha.value.slice(8)))}, a partir de ${monthLabel(monthKey(f.fecha.value))}). En los próximos meses lo apuntas tú y lo vinculas para que la previsión lo dé por hecho.` : '';
 }
 function actualizarVenceGarantia() {
   const f = $('#movForm'), anios = parseImporte(f.garAnios.value || '0');
@@ -1048,22 +1049,73 @@ function mostrarDesgloseCuota(rellenar = false) {
   }
 }
 
+let recPeriodoManual = false;
+function recurrentesDelTipo(tipo) {
+  return Store.list('recurrentes').filter(r => r.activo !== false && r.tipo === tipo)
+    .sort((a, b) => (a.descripcion || a.categoria || '').localeCompare(b.descripcion || b.categoria || '', LOCALE));
+}
+function llenarSelectRecurrente(sel = '', periodo = '') {
+  const s = $('#mRecurrente'); if (!s) return;
+  const list = recurrentesDelTipo(movTipo());
+  const extra = sel && !list.some(r => r.id === sel) ? `<option value="${esc(sel)}">(recurrente borrado)</option>` : '';
+  s.innerHTML = `<option value="">— Ninguno</option>` + list.map(r => {
+    const dia = r.dia === FC.DIA_ULTIMO ? 'último día' : `día ${r.dia}`;
+    return `<option value="${esc(r.id)}">${esc((r.descripcion || r.categoria || 'Recurrente') + ' · ' + eur(r.importe) + ' · ' + dia)}</option>`;
+  }).join('') + extra;
+  s.value = sel || '';
+  const per = $('#mRecPeriodo');
+  const ym = /^\d{4}-\d{2}$/.test(periodo) ? periodo : monthKey(($('#movForm') && $('#movForm').fecha.value) || todayISO());
+  if (per) per.value = ym;
+  syncRecurrenteRow();
+}
+function syncRecurrenteRow() {
+  const hay = !!( $('#mRecurrente') && $('#mRecurrente').value );
+  if ($('#rowRecPeriodo')) $('#rowRecPeriodo').hidden = !hay;
+}
+function aplicarPlantillaRecurrente() {
+  const r = Store.get('recurrentes', $('#mRecurrente') && $('#mRecurrente').value); if (!r) return;
+  const f = $('#movForm');
+  if (!String(f.importe.value || '').trim()) f.importe.value = fmtInput(r.importe);
+  if (!String(f.descripcion.value || '').trim()) f.descripcion.value = r.descripcion || '';
+  fillCategoriaSelect(r.tipo, r.categoria);
+  if (!String(f.cuenta.value || '').trim() && (r.cuenta || r.cuentaId)) prepararCuenta(f.cuenta, r);
+  if (!f.id.value) {
+    if (r.tipo === 'gasto') { const nat = f.querySelector(`input[name="naturaleza"][value="${r.naturaleza || 'fijo'}"]`); if (nat) nat.checked = true; }
+    else $('#mTipoIngreso').value = r.tipoIngreso || 'otro';
+  }
+  if (!recPeriodoManual && f.fecha.value) {
+    const per = monthKey(f.fecha.value);
+    if ($('#mRecPeriodo') && !$('#mRecPeriodo').value) $('#mRecPeriodo').value = per;
+  }
+  syncRecurrenteRow();
+}
+function abrirRegistroRecurrente(recId, periodo) {
+  const r = Store.get('recurrentes', recId); if (!r) return;
+  const ym = /^\d{4}-\d{2}$/.test(periodo) ? periodo : monthKey(todayISO());
+  const fecha = FC.fechaRecurrenteEn(r, ym);
+  openMovDialog(null, { tipo: r.tipo, importe: r.importe, categoria: r.categoria, descripcion: r.descripcion, cuenta: r.cuenta, cuentaId: r.cuentaId, naturaleza: r.naturaleza, tipoIngreso: r.tipoIngreso, fecha, recurrenteId: r.id, recurrentePeriodo: ym });
+}
 function openMovDialog(mov, preset = {}) {
   const f = $('#movForm'); f.reset(); $('#movError').style.display = 'none';
   MovDlg.mov = mov || null;
   const tipo = mov?.tipo || preset.tipo || 'gasto';
   f.id.value = mov?.id || '';
   f.querySelector(`input[name="tipo"][value="${tipo}"]`).checked = true;
-  f.importe.value = mov ? fmtInput(mov.importe) : '';
+  recPeriodoManual = false;
+  f.importe.value = mov ? fmtInput(mov.importe) : (preset.importe != null && preset.importe !== '' ? fmtInput(preset.importe) : '');
   // por defecto: hoy si estamos en el mes actual, si no el día 1 del mes seleccionado
-  f.fecha.value = mov?.fecha || (enPeriodo(todayISO()) ? todayISO() : periodo().desde);
-  fillCategoriaSelect(tipo, mov?.categoria);
-  f.descripcion.value = mov?.descripcion || '';
+  f.fecha.value = mov?.fecha || preset.fecha || (enPeriodo(todayISO()) ? todayISO() : periodo().desde);
+  fillCategoriaSelect(tipo, mov?.categoria || preset.categoria);
+  f.descripcion.value = mov?.descripcion || preset.descripcion || '';
   f.querySelector(`input[name="naturaleza"][value="${mov?.naturaleza || naturalezaPorDefecto(f.categoria.value)}"]`).checked = true;
-  $('#mTipoIngreso').value = mov?.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
+  $('#mTipoIngreso').value = mov?.tipoIngreso || preset.tipoIngreso || tipoIngresoPorDefecto(f.categoria.value);
+  if (preset.naturaleza && f.querySelector(`input[name="naturaleza"][value="${preset.naturaleza}"]`)) f.querySelector(`input[name="naturaleza"][value="${preset.naturaleza}"]`).checked = true;
   llenarSelectPrevisto(mov?.previstoId || preset.previstoId || '');   // v3.9 (plan.js)
   $('#cuentasList').innerHTML = [...new Set(Store.getMovimientos().map(m => m.cuenta).filter(Boolean))].map(c => `<option value="${esc(c)}">`).join('');
-  prepararCuenta(f.cuenta, mov);
+  prepararCuenta(f.cuenta, mov || (preset.cuenta || preset.cuentaId ? preset : null));
+  const vin = mov ? FC.vinculoRecurrente(mov) : null;
+  llenarSelectRecurrente(vin?.recurrenteId || preset.recurrenteId || '', vin?.recurrentePeriodo || preset.recurrentePeriodo || '');
+  if (preset.recurrentePeriodo) recPeriodoManual = true;
   // pago de deuda
   f.esPago.checked = !!mov?.deudaId; llenarSelectDeudas(mov?.deudaId, mov?.cuotaN);
   // financiación
@@ -1075,7 +1127,7 @@ function openMovDialog(mov, preset = {}) {
   f.garProducto.value = mov?.garantia?.producto || ''; f.garAnios.value = fmtInputN(mov?.garantia?.anios || FC.GARANTIA_ANIOS_DEFECTO);
   // recurrente (solo al crear)
   $("#optRec").hidden = !!mov; f.esRec.checked = false; f.recUltimo.checked = false;
-  $('#movRecNota').hidden = !mov?.recurrenteId;
+  $('#movRecNota').hidden = !(mov && (mov.recurrenteId || (vin && vin.recurrenteId)));
   $('#movDialogTitle').textContent = mov ? 'Editar movimiento' : 'Nuevo movimiento';
   $('#movDelete').style.display = mov ? '' : 'none';
   $('#ocrPanel').hidden = true; $('#ocrPanel').innerHTML = '';
@@ -1085,7 +1137,12 @@ function openMovDialog(mov, preset = {}) {
   syncMovOpciones();
   $('#movDialog').showModal(); setTimeout(() => f.importe.focus(), 30);
 }
-$$('#movForm input[name="tipo"]').forEach(r => r.addEventListener('change', () => { fillCategoriaSelect(r.value); syncMovOpciones(); }));
+$$('#movForm input[name="tipo"]').forEach(r => r.addEventListener('change', () => {
+  fillCategoriaSelect(r.value); llenarSelectRecurrente('', $('#mRecPeriodo') && $('#mRecPeriodo').value); syncMovOpciones();
+}));
+if ($('#mRecurrente')) $('#mRecurrente').addEventListener('change', () => { aplicarPlantillaRecurrente(); syncRecurrenteRow(); });
+if ($('#mRecPeriodo')) $('#mRecPeriodo').addEventListener('change', () => { recPeriodoManual = true; });
+
 $('#mCategoria').addEventListener('change', e => { // por defecto según la categoría (se puede cambiar)
   const f = $('#movForm');
   if (movTipo() === 'gasto' && !f.id.value) f.querySelector(`input[name="naturaleza"][value="${naturalezaPorDefecto(e.target.value)}"]`).checked = true;
@@ -1101,7 +1158,10 @@ $('#mCategoria').addEventListener('change', e => { // por defecto según la cate
 }));
 $('#movForm').deudaId.addEventListener('change', () => { llenarSelectCuotas(); mostrarDesgloseCuota(true); });
 $('#movForm').cuotaN.addEventListener('change', () => mostrarDesgloseCuota(true));
-$('#movForm').fecha.addEventListener('change', syncMovOpciones);
+$('#movForm').fecha.addEventListener('change', () => {
+  if (!recPeriodoManual && $('#mRecPeriodo') && $('#movForm').fecha.value) $('#mRecPeriodo').value = monthKey($('#movForm').fecha.value);
+  syncMovOpciones();
+});
 $('#movForm').recUltimo.addEventListener('change', syncMovOpciones);
 $('#movForm').garAnios.addEventListener('input', actualizarVenceGarantia);
 $('#movForm').importe.addEventListener('input', () => { if ($('#movForm').esFin.checked) previewFin('#movFin', parseImporte($('#movForm').importe.value)); });
@@ -1117,6 +1177,11 @@ $('#movForm').addEventListener('submit', async e => {
   delete mov.deudaId; delete mov.cuotaN; delete mov.desglose; delete mov.financiadoPor; delete mov.garantia; delete mov.naturaleza; delete mov.tipoIngreso;
   if (gasto) mov.naturaleza = f.querySelector('input[name="naturaleza"]:checked').value; else mov.tipoIngreso = $('#mTipoIngreso').value;   // v3.8: f.tipoIngreso chocaba con el radio id=tipoIngreso (devolvía «ingreso»)
   delete mov.previstoId; if (!gasto && $('#mPrevisto').value) mov.previstoId = $('#mPrevisto').value;   // v3.9: cumple un ingreso previsto
+  delete mov.recurrenteId; delete mov.recurrentePeriodo;
+  if ($('#mRecurrente') && $('#mRecurrente').value) {
+    mov.recurrenteId = $('#mRecurrente').value;
+    mov.recurrentePeriodo = ($('#mRecPeriodo') && $('#mRecPeriodo').value) || monthKey(mov.fecha);
+  }
   const cambios = [];
   // Pago de una cuota de deuda
   if (gasto && f.esPago.checked) {
@@ -1134,7 +1199,7 @@ $('#movForm').addEventListener('submit', async e => {
   // Repetir cada mes -> plantilla recurrente (y este movimiento es el del primer mes)
   if (!editando && f.esRec.checked) {
     const rec = { id: uid(), tipo, importe, categoria: mov.categoria, descripcion: mov.descripcion, cuenta: mov.cuenta, ...(mov.cuentaId ? { cuentaId: mov.cuentaId } : {}), dia: f.recUltimo.checked ? FC.DIA_ULTIMO : Number(mov.fecha.slice(8)), desde: monthKey(mov.fecha), hasta: '', activo: true, naturaleza: mov.naturaleza, tipoIngreso: mov.tipoIngreso };
-    mov.id = FC.idRecurrente(rec.id, rec.desde); mov.recurrenteId = rec.id;
+    mov.id = FC.idRecurrente(rec.id, rec.desde); mov.recurrenteId = rec.id; mov.recurrentePeriodo = rec.desde;
     cambios.push({ col: 'recurrentes', rec });
   }
   if (!mov.id) mov.id = MovDlg.adj.owner.ownerId;
@@ -1194,7 +1259,7 @@ async function confirmarBorrarMov(id) {
     await Store.apply([{ col: 'movimientos', del: id }, { col: 'deudas', del: m.financiadoPor }]); return true;
   }
   const rp = repostajeDeMov(m);
-  const extra = rp ? '\n\nEs un repostaje: se borrarán también sus datos de litros y km.' : m.recurrenteId ? '\n\nEs un movimiento recurrente: solo se elimina este mes (no se volverá a crear). Para dejar de generarlo, edita la plantilla en «Movimientos recurrentes».' : '';
+  const extra = rp ? '\n\nEs un repostaje: se borrarán también sus datos de litros y km.' : m.recurrenteId ? '\n\nEstá vinculado a un recurrente: al borrarlo, ese periodo volverá a quedar pendiente en la previsión.' : '';
   if (!confirm('¿Eliminar este movimiento?' + extra)) return false;
   await Store.deleteMovimiento(id); return true;
 }
@@ -1450,12 +1515,20 @@ function generarDatosEjemplo(ym = UI.mes) {
   const movs = []; let seed = 42; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   const add = (tipo, fecha, importe, categoria, descripcion, cuenta = 'Banco', extra = {}) => { const m = { id: uid(), tipo, fecha, importe: round2(importe), categoria, descripcion, cuenta, ...extra }; if (fecha <= hoy) movs.push(m); return m; };
   const desde = addMonths(ym, -11);
-  // Plantillas recurrentes: la app crea sola la nómina y el alquiler de cada mes
+  // Plantillas recurrentes (v3.11: ya no se crean solos; los de ejemplo se apuntan vinculados más abajo)
   const recurrentes = [
     { id: uid(), tipo: 'ingreso', importe: 2150, categoria: 'Nómina', descripcion: 'Nómina mensual', cuenta: 'Banco', dia: 1, desde, tipoIngreso: 'nomina', activo: true },
     { id: uid(), tipo: 'gasto', importe: 750, categoria: 'Vivienda', descripcion: 'Alquiler piso', cuenta: 'Banco', dia: 2, desde, naturaleza: 'fijo', activo: true },
     { id: uid(), tipo: 'gasto', importe: 12.99, categoria: 'Suscripciones', descripcion: 'Netflix', cuenta: 'Tarjeta', dia: 12, desde, naturaleza: 'fijo', activo: true }
   ];
+  for (const r of recurrentes) {
+    for (const p of FC.periodosRecurrente(r, hoy)) {
+      add(r.tipo, p.fecha, r.importe, r.categoria, r.descripcion, r.cuenta, {
+        id: p.id, recurrenteId: r.id, recurrentePeriodo: p.periodo,
+        ...(r.tipo === 'gasto' ? { naturaleza: r.naturaleza || 'fijo' } : { tipoIngreso: r.tipoIngreso || 'otro' })
+      });
+    }
+  }
   for (let i = 11; i >= 0; i--) {
     const k = addMonths(ym, -i), d = n => `${k}-${pad(n)}`;
     if (rnd() > .5) add('ingreso', d(15), 200 + rnd() * 500, 'Freelance', 'Proyecto web', 'Banco', { tipoIngreso: 'extra' });

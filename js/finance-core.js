@@ -7,8 +7,9 @@
      (lo que recibes menos comisiones iniciales, frente a cuotas + comisiones
      periódicas), anualizada: TAE = (1 + i)^12 − 1.
    - Inversiones: FIFO (lo primero que compras es lo primero que vendes).
-   - Recurrentes: ids deterministas (rec_<plantilla>_<YYYY-MM>) para que
-     varios dispositivos generen exactamente el mismo registro.
+   - Recurrentes: las plantillas no crean movimientos solas (v3.11). El vínculo
+     es recurrenteId + recurrentePeriodo (YYYY-MM). Los ids antiguos
+     rec_<plantilla>_<YYYY-MM> se reconocen y se migran solos.
    - Garantías, enlace de Google Calendar, lectura de tickets/nóminas (texto OCR)
      y CSV de operaciones.
    ========================================================= */
@@ -401,6 +402,12 @@
 
   /* ---------------- Movimientos recurrentes ---------------- */
   const idRecurrente = (plantillaId, ym) => `rec_${plantillaId}_${ym}`;
+  const RE_ID_REC = /^rec_(.+)_(\d{4}-\d{2})$/;
+  /** Interpreta un id antiguo rec_<plantilla>_<YYYY-MM>. */
+  function parseIdRecurrente(id) {
+    const m = String(id || '').match(RE_ID_REC);
+    return m ? { plantillaId: m[1], periodo: m[2] } : null;
+  }
   /** v3.9: día de cobro de una plantilla en el mes `ym`: el normal (`dia`) o el que pusiste para ese mes del año
       en `diasMes` ({ 12: 22 } = cada diciembre el día 22; vale 1–31 o 'ultimo'). */
   function diaRecurrenteEn(rec, ym) {
@@ -409,10 +416,8 @@
   }
   const fechaRecurrenteEn = (rec, ym) => fechaCobroEnMes(ym, diaRecurrenteEn(rec, ym));
   /**
-   * Meses que tocan para una plantilla, hasta hoy (incluido) y como mucho `maxMeses` hacia atrás.
-   * Cada uno lleva su id determinista y un updatedAt determinista (medianoche UTC de su fecha):
-   * así dos dispositivos crean el mismo registro, y cualquier edición o borrado del usuario
-   * (siempre posterior a esa fecha) gana en la fusión y no se «resucita».
+   * Periodos de una plantilla hasta hoy (o hasta `hasta`), como mucho `maxMeses` hacia atrás.
+   * Sirve para listar pendientes y para migrar los movimientos que se generaron con el id determinista.
    */
   function periodosRecurrente(rec, hoy, maxMeses = 36) {
     if (!rec || rec.deleted || rec.activo === false || !/^\d{4}-\d{2}$/.test(rec.desde || '')) return [];
@@ -427,22 +432,48 @@
     }
     return out;
   }
-  /** Movimientos que faltan por generar (los ids ya existentes, vivos o borrados, se respetan). */
-  function generarRecurrentes(plantillas, movimientos, hoy) {
-    const existentes = new Set(movimientos.map(m => m.id));
-    const nuevos = [];
-    for (const r of plantillas) {
-      if (r.deleted) continue;
-      for (const p of periodosRecurrente(r, hoy)) {
-        if (existentes.has(p.id)) continue;
-        const m = { id: p.id, tipo: r.tipo, fecha: p.fecha, importe: round2(r.importe), categoria: r.categoria, descripcion: r.descripcion || '', cuenta: r.cuenta || '', recurrenteId: r.id, updatedAt: p.updatedAt };
-        if (r.cuentaId) m.cuentaId = r.cuentaId;
-        if (r.tipo === 'gasto') m.naturaleza = r.naturaleza || 'fijo'; else m.tipoIngreso = r.tipoIngreso || 'otro';
-        nuevos.push(m); existentes.add(p.id);
-      }
+  /**
+   * Vínculo de un movimiento a una plantilla y un periodo (mes). Lee recurrenteId + recurrentePeriodo
+   * o, si faltan, el id rec_<plantilla>_<YYYY-MM> y, en último caso, el mes de la fecha.
+   */
+  function vinculoRecurrente(m) {
+    if (!m) return null;
+    let recurrenteId = m.recurrenteId ? String(m.recurrenteId) : '';
+    let recurrentePeriodo = /^\d{4}-\d{2}$/.test(m.recurrentePeriodo || '') ? m.recurrentePeriodo : '';
+    const parsed = parseIdRecurrente(m.id);
+    if (parsed) {
+      if (!recurrenteId) recurrenteId = parsed.plantillaId;
+      if (!recurrentePeriodo) recurrentePeriodo = parsed.periodo;
     }
-    return nuevos;
+    if (recurrenteId && !recurrentePeriodo && isISO(m.fecha)) recurrentePeriodo = m.fecha.slice(0, 7);
+    return recurrenteId ? { recurrenteId, recurrentePeriodo: recurrentePeriodo || null } : null;
   }
+  /** Rellena recurrenteId / recurrentePeriodo si se pueden inferir. No toca updatedAt. Devuelve true si añadió algo. */
+  function aplicarVinculoRecurrente(m) {
+    if (!m || m.deleted) return false;
+    const v = vinculoRecurrente(m);
+    if (!v) return false;
+    let cam = false;
+    if (m.recurrenteId !== v.recurrenteId) { m.recurrenteId = v.recurrenteId; cam = true; }
+    if (v.recurrentePeriodo && m.recurrentePeriodo !== v.recurrentePeriodo) { m.recurrentePeriodo = v.recurrentePeriodo; cam = true; }
+    return cam;
+  }
+  function migrarVinculosRecurrentes(movimientos) {
+    let n = 0;
+    for (const m of movimientos || []) if (aplicarVinculoRecurrente(m)) n++;
+    return n;
+  }
+  /** Movimiento vivo vinculado a esa plantilla y ese periodo (mes), o null. */
+  function movimientoDeRecurrente(movimientos, recId, ym) {
+    if (!recId || !ym) return null;
+    return (movimientos || []).find(m => {
+      if (m.deleted) return false;
+      const v = vinculoRecurrente(m);
+      return v && v.recurrenteId === recId && v.recurrentePeriodo === ym;
+    }) || null;
+  }
+  /** v3.11: las plantillas ya no crean movimientos. Se mantiene por compatibilidad y siempre devuelve []. */
+  function generarRecurrentes(/* plantillas, movimientos, hoy */) { return []; }
 
   /* ---------------- Garantías ---------------- */
   const GARANTIA_ANIOS_DEFECTO = 3; // bienes nuevos en España (RDL 1/2007 tras la reforma de 2022)
@@ -634,7 +665,7 @@
     DIA_ULTIMO, normalizarDiaCobro, fechaCobroEnMes, fechaCuota, textoDiaCobro,
     cuotaFrancesa, cuadroAmortizacion, cuadroFrances, cuadroManual, esManual, importeCuotaManual, pagosManual, tinImplicito, compatManual, tir, calcularTAE, resumenDeuda,
     fifo, carteraFIFO, erroresNuevos, cuadreTraspasoFondos, ordenarOperaciones, ultimoPrecio, metricasActivo, metricasCartera, disponibleEn, disponibleActivo,
-    idRecurrente, periodosRecurrente, generarRecurrentes, diaRecurrenteEn, fechaRecurrenteEn,
+    idRecurrente, parseIdRecurrente, vinculoRecurrente, aplicarVinculoRecurrente, migrarVinculosRecurrentes, movimientoDeRecurrente, periodosRecurrente, generarRecurrentes, diaRecurrenteEn, fechaRecurrenteEn,
     GARANTIA_ANIOS_DEFECTO, vencimientoGarantia, estadoGarantia, urlGoogleCalendar,
     parseNumeroES, importesEn, fechasEn, detectarTipoDocumento, analizarTexto,
     CSV_COLUMNAS, PLANTILLA_CSV, parseCSVOperaciones, parseFechaFlexible, migrarInversionV2
