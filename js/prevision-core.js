@@ -66,6 +66,19 @@
     const noms = movs.filter(m => m.tipo === 'ingreso' && m.tipoIngreso === 'nomina' && FC.isISO(m.fecha) && m.fecha <= hoy).map(m => m.fecha).sort();
     let ultima = noms[noms.length - 1];
     if (ultima && FC.diffDays(ultima, hoy) > 45) ultima = null;   // la última es muy antigua: el periodo actual empieza hoy
+    // v3.11: si hay una nómina recurrente cuya fecha ya llegó y aún no está apuntada, el periodo actual empieza ese día (sigue pendiente; ya no se retrasa a mañana).
+    if (dn && dn.recurrente) {
+      const rec = dn.recurrente;
+      let ym = ultima ? ultima.slice(0, 7) : (rec.desde || ym0);
+      let esperadaLlegada = null;
+      for (; ym <= ym0; ym = FC.ymAdd(ym, 1)) {
+        if (ym < (rec.desde || '0000-00')) continue;
+        if (rec.hasta && ym > rec.hasta) break;
+        const f = dn.fechaEn(ym);
+        if (f <= hoy && (!ultima || f > ultima)) esperadaLlegada = f;
+      }
+      if (esperadaLlegada) ultima = esperadaLlegada;
+    }
     // Siguiente nómina: la primera fecha esperada al menos 15 días después del inicio del periodo anterior
     const siguiente = base => { let ym = base.slice(0, 7); for (let i = 0; i < 4; i++, ym = FC.ymAdd(ym, 1)) { const f = dn.fechaEn(ym); if (FC.diffDays(base, f) >= 15) return f; } return FC.addMonthsISO(base, 1); };
     const lista = []; let desde = ultima || hoy;
@@ -119,11 +132,10 @@
       for (const ym of mesesGen) {
         if (ym < r.desde || (r.hasta && ym > r.hasta)) continue;
         let fecha = FC.fechaRecurrenteEn(r, ym);   // v3.9: con el día especial de ese mes
-        const apuntado = enMes(ym, m => m.id === FC.idRecurrente(r.id, ym) || m.recurrenteId === r.id);
-        if (apuntado) continue;            // ya está en el saldo (o, si es futuro, entra abajo como apuntado)
+        const hecho = FC.movimientoDeRecurrente(movs, r.id, ym);
+        if (hecho) continue;               // v3.11: hay un movimiento vinculado a este periodo (el importe real ya está en el saldo o, si es futuro, entra abajo como apuntado)
         if (esNom) fecha = fechaNomina(fecha);
-        if (fecha < hoy) continue;         // pasó la fecha y no está: lo borraste a propósito
-        add(fecha, { tipo: r.tipo === 'ingreso' ? 'ingreso' : 'fijo', concepto: r.descripcion || r.categoria || (esNom ? 'Nómina' : 'Recurrente'), importe: r.importe, origen: 'recurrente', id: r.id, nomina: esNom });
+        add(fecha, { tipo: r.tipo === 'ingreso' ? 'ingreso' : 'fijo', concepto: r.descripcion || r.categoria || (esNom ? 'Nómina' : 'Recurrente'), importe: r.importe, origen: 'recurrente', id: r.id, nomina: esNom, periodo: ym, pendiente: fecha < hoy });
       }
     }
     // 2) Nómina estimada (sin nómina recurrente)

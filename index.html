@@ -120,7 +120,7 @@
     </div>
     <div class="card"><h3 style="margin-top:0" id="prevChartTitle">Saldo previsto a fin de cada mes</h3><div class="chart-box" style="height:240px"><canvas id="chartPrevision"></canvas></div></div>
     <div id="prevMesesList"></div>
-    <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. En el mes actual solo cuenta lo que aún está pendiente. Los presupuestos (p. ej. Combustible) cuentan como gasto fijo en cada periodo y los ingresos previstos (pagas extra, productividad) el mes que tocan; cuando apuntas el ingreso real, se usa el real. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
+    <p class="muted small">Cómo se calcula: saldo inicial (hoy, el real de tus cuentas del día a día; los meses siguientes, lo que sobra del anterior) + ingresos recurrentes y nómina − gastos fijos recurrentes − cuotas de deudas sin pagar − gasto variable estimado. Un recurrente cuenta como hecho cuando lo apuntas y lo vinculas a ese periodo; si no, sigue pendiente (se usa el importe real del movimiento vinculado). Los presupuestos (p. ej. Combustible) cuentan como gasto fijo en cada periodo y los ingresos previstos (pagas extra, productividad) el mes que tocan. Es una estimación: no incluye gastos que no hayas apuntado como recurrentes ni compras de inversión.</p>
   </section>
 
   <!-- MOVIMIENTOS -->
@@ -150,7 +150,7 @@
     </div>
     <div class="card">
       <div class="card-head"><h3 style="margin:0">Movimientos recurrentes</h3><button id="addRecBtn">＋ Nuevo recurrente</button></div>
-      <p class="muted small" style="margin-top:0">La app crea sola cada mes estos movimientos (al abrirla). No se duplican aunque uses varios dispositivos.</p>
+      <p class="muted small" style="margin-top:0">Estos movimientos aparecen en la previsión. No se crean solos: cuando los apuntes, indícale a qué recurrente y mes corresponden para que la previsión los dé por hechos.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Concepto</th><th class="hide-sm">Categoría</th><th>Cuándo</th><th class="num">Importe</th><th>Estado</th><th></th></tr></thead>
         <tbody id="recBody"></tbody></table></div>
@@ -449,7 +449,9 @@
         <div class="seg seg-sm"><input type="radio" name="naturaleza" id="natFijo" value="fijo"><label for="natFijo">Fijo</label><input type="radio" name="naturaleza" id="natVar" value="variable" checked><label for="natVar">Variable</label></div></div>
       <div id="rowTipoIngreso"><label for="mTipoIngreso">Tipo de ingreso</label><select id="mTipoIngreso" name="tipoIngreso"><option value="nomina">Nómina</option><option value="extra">Extra</option><option value="otro">Otro</option></select></div>
       <div id="rowPrevisto" hidden><label for="mPrevisto">Corresponde al ingreso previsto</label><select id="mPrevisto"></select></div>
-      <p class="full muted small" id="movRecNota" hidden style="margin:0">🔁 Creado por un movimiento recurrente. Cambiarlo aquí solo afecta a este mes.</p>
+      <div id="rowRecurrente"><label for="mRecurrente">Corresponde a recurrente</label><select id="mRecurrente"></select></div>
+      <div id="rowRecPeriodo" hidden><label for="mRecPeriodo">Periodo (mes)</label><input id="mRecPeriodo" name="recurrentePeriodo" type="month"></div>
+      <p class="full muted small" id="movRecNota" hidden style="margin:0">🔁 Vinculado a un movimiento recurrente. Cambiarlo aquí solo afecta a este periodo.</p>
     </div>
 
     <div class="opts">

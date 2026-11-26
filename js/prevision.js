@@ -17,7 +17,13 @@ function calcPrevision() {
   return { ...P, saldoHoy: saldo === null ? 0 : saldo, saldoNulo: saldo === null, hayCuentas };
 }
 
-const prevItem = it => `<tr class="prev-item${it.vencida ? ' vencida' : ''}${it.previsto ? ' prev-previsto' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${it.estimado ? ` <span class="badge b-var">${it.previsto ? 'Estimado' : 'Estimada'}</span>` : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}<div class="muted small">${it.previsto ? 'Ingreso previsto (Planificación)' : it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo'}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`;
+const prevItem = it => {
+  const recPend = it.origen === 'recurrente' && it.id;
+  const badge = `${it.estimado ? ` <span class="badge b-var">${it.previsto ? 'Estimado' : 'Estimada'}</span>` : ''}${it.vencida ? ` <span class="badge b-warn">Vencida el ${fmtFecha(it.fechaCuota)} sin marcar</span>` : ''}${it.pendiente && recPend ? ' <span class="badge b-warn">Pendiente</span>' : ''}`;
+  const sub = recPend ? 'Recurrente pendiente' : it.previsto ? 'Ingreso previsto (Planificación)' : it.tipo === 'ingreso' ? 'Ingreso' : it.tipo === 'cuota' ? 'Cuota de deuda' : 'Gasto fijo';
+  const btn = recPend ? ` <button type="button" class="btn-sm btn-primary" data-reg-rec="${esc(it.id)}" data-reg-periodo="${esc(it.periodo || it.fecha.slice(0, 7))}">Registrar</button>` : '';
+  return `<tr class="prev-item${it.vencida ? ' vencida' : ''}${it.previsto ? ' prev-previsto' : ''}${recPend ? ' prev-rec-pend' : ''}"><td class="nowrap">${fmtFecha(it.fecha).slice(0, 5)}</td><td>${esc(it.concepto)}${badge}${btn}<div class="muted small">${sub}</div></td><td class="num ${it.tipo === 'ingreso' ? 'pos' : 'neg'}">${it.tipo === 'ingreso' ? '+' : '−'}${eur(it.importe)}</td></tr>`;
+};
 // v3.9: presupuestos (gasto fijo del periodo: lo que queda) e ingresos previstos que has quitado de la Previsión
 const prevPresu = m => m.presupuestosDet.map(x => `<tr class="prev-item prev-presu"><td class="nowrap"></td><td>Presupuesto ${esc(x.categoria)} <span class="badge">${eur(x.presupuesto)}</span><div class="muted small">Gasto fijo (presupuesto)${x.gastado ? ` · ya gastado ${eur(x.gastado)}${x.excedido ? `, te has pasado ${eur(x.excedido)}` : ''}` : ''}</div></td><td class="num neg">${x.queda ? '−' : ''}${eur(x.queda)}</td></tr>`).join('');
 const prevExcl = m => (m.excluidos || []).map(x => `<tr class="prev-item prev-excluido"><td class="nowrap">${fmtFecha(x.fecha).slice(0, 5)}</td><td>${esc(x.concepto)} <span class="badge">No incluido</span><div class="muted small">Lo has quitado de la Previsión (Planificación)</div></td><td class="num muted">${eur(x.importe)}</td></tr>`).join('');

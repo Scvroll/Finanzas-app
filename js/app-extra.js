@@ -222,14 +222,23 @@ document.addEventListener('click', e => {
 /* ---------------- Movimientos recurrentes ---------------- */
 function renderRecurrentes() {
   const list = Store.list('recurrentes').sort((a, b) => (b.activo - a.activo) || a.descripcion.localeCompare(b.descripcion, LOCALE));
-  $('#recBody').innerHTML = list.length ? list.map(r => `<tr class="${r.activo ? '' : 'muted'}">
-    <td>${esc(r.descripcion || r.categoria)}<div class="badges"><span class="tag ${r.tipo}">${r.tipo === 'gasto' ? 'Gasto' : 'Ingreso'}</span> ${r.tipo === 'gasto' ? `<span class="badge ${r.naturaleza === 'fijo' ? 'b-fijo' : 'b-var'}">${r.naturaleza === 'fijo' ? 'Fijo' : 'Variable'}</span>` : `<span class="badge b-${r.tipoIngreso}">${TIPOS_INGRESO[r.tipoIngreso]}</span>`}</div></td>
+  const movs = Store.getMovimientos(), ym = monthKey(todayISO());
+  $('#recBody').innerHTML = list.length ? list.map(r => {
+    const hecho = r.activo !== false ? FC.movimientoDeRecurrente(movs, r.id, ym) : null;
+    const pend = r.activo !== false && !hecho;
+    const est = !r.activo ? '' : hecho
+      ? `<div class="muted small">Este mes: hecho (${eur(hecho.importe)})</div>`
+      : `<div class="muted small">Este mes: pendiente</div>`;
+    const reg = pend ? ` <button type="button" class="btn-sm btn-primary" data-reg-rec="${r.id}" data-reg-periodo="${ym}">Registrar</button>` : '';
+    return `<tr class="${r.activo ? '' : 'muted'}">
+    <td>${esc(r.descripcion || r.categoria)}${est}<div class="badges"><span class="tag ${r.tipo}">${r.tipo === 'gasto' ? 'Gasto' : 'Ingreso'}</span> ${r.tipo === 'gasto' ? `<span class="badge ${r.naturaleza === 'fijo' ? 'b-fijo' : 'b-var'}">${r.naturaleza === 'fijo' ? 'Fijo' : 'Variable'}</span>` : `<span class="badge b-${r.tipoIngreso}">${TIPOS_INGRESO[r.tipoIngreso]}</span>`}</div></td>
     <td class="hide-sm">${esc(r.categoria)}</td>
     <td>${r.dia === FC.DIA_ULTIMO ? 'Último día' : `Día ${r.dia}`}<div class="muted small">desde ${monthLabel(r.desde, true)}${r.hasta ? ' hasta ' + monthLabel(r.hasta, true) : ''}</div></td>
     <td class="num ${r.tipo === 'ingreso' ? 'pos' : 'neg'}">${eur(r.importe)}</td>
     <td>${r.activo ? '<span class="badge b-ok">Activo</span>' : '<span class="badge">En pausa</span>'}</td>
-    <td class="actions"><button class="btn-sm" data-rec-toggle="${r.id}" title="${r.activo ? 'Pausar' : 'Reanudar'}">${r.activo ? '⏸️' : '▶️'}</button> <button class="btn-sm" data-rec-edit="${r.id}" title="Editar">✏️</button> <button class="btn-sm btn-danger" data-rec-del="${r.id}" title="Eliminar">🗑️</button></td>
-  </tr>`).join('') : '<tr><td colspan="6" class="empty">Sin movimientos recurrentes. Crea uno (p. ej. la nómina o el alquiler) y la app lo añadirá sola cada mes.</td></tr>';
+    <td class="actions">${reg}<button class="btn-sm" data-rec-toggle="${r.id}" title="${r.activo ? 'Pausar' : 'Reanudar'}">${r.activo ? '⏸️' : '▶️'}</button> <button class="btn-sm" data-rec-edit="${r.id}" title="Editar">✏️</button> <button class="btn-sm btn-danger" data-rec-del="${r.id}" title="Eliminar">🗑️</button></td>
+  </tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">Sin movimientos recurrentes. Crea uno (p. ej. la nómina o el alquiler) y apúntalo cada mes vinculándolo para que la previsión lo dé por hecho.</td></tr>';
 }
 function recTipo() { return $('#recForm').querySelector('input[name="tipo"]:checked').value; }
 function recSyncTipo(cat) {
@@ -276,7 +285,6 @@ $('#recForm').addEventListener('submit', async e => {
   if (!/^\d{4}-\d{2}$/.test(f.desde.value)) return err('Indica desde qué mes.');
   if (f.hasta.value && f.hasta.value < f.desde.value) return err('«Hasta» no puede ser anterior a «Desde».');
   const t = recTipo(), viejo = Store.get('recurrentes', f.id.value);
-  if (!viejo && f.desde.value < monthKey(todayISO()) && !confirm(`Se crearán también los movimientos de los meses pasados desde ${monthLabel(f.desde.value)}. ¿Continuar?`)) return;
   const diasMes = leerDiasMes();
   const rec = ponerCuenta({ ...(viejo || {}), id: f.id.value || null, tipo: t, importe, categoria: f.categoria.value, descripcion: f.descripcion.value.trim(), dia, desde: f.desde.value, hasta: f.hasta.value, activo: f.activo.checked, naturaleza: f.querySelector('input[name="naturaleza"]:checked').value, tipoIngreso: f.tipoIngreso.value }, f.cuenta);
   delete rec.diasMes; if (diasMes) rec.diasMes = diasMes;
@@ -679,11 +687,12 @@ $$('[data-plantilla-csv]').forEach(b => b.addEventListener('click', descargarPla
 document.addEventListener('click', async e => {
   const t = e.target.closest('button'); if (!t) return;
   const d = t.dataset;
+  if (d.regRec) { abrirRegistroRecurrente(d.regRec, d.regPeriodo); return; }
   if (d.recEdit) openRecDialog(Store.get('recurrentes', d.recEdit));
   if (d.recToggle) {
     const r = Store.get('recurrentes', d.recToggle);
     const upd = { ...r, activo: !r.activo };
-    if (!r.activo && r.desde < monthKey(todayISO()) && !confirm('¿Crear también los movimientos de los meses en los que estuvo en pausa?\n\nAceptar: sí, crearlos.\nCancelar: empezar desde este mes.')) upd.desde = monthKey(todayISO());
+      if (!r.activo && r.desde < monthKey(todayISO()) && !confirm('¿Quieres que los meses en que estuvo en pausa aparezcan como pendientes en la previsión?\n\nAceptar: sí.\nCancelar: empezar desde este mes.')) upd.desde = monthKey(todayISO());
     await Store.put('recurrentes', upd); toast(upd.activo ? 'Recurrente reanudado' : 'Recurrente en pausa');
   }
   if (d.recDel && confirm('¿Eliminar este movimiento recurrente? Los movimientos ya creados se conservan.')) { await Store.remove('recurrentes', d.recDel); toast('Recurrente eliminado'); }
